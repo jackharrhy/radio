@@ -3,13 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
     "dev": "NODE_ENV=development node --watch --import remix/node-tsx server.ts",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
     "start": "NODE_ENV=production node --import remix/node-tsx server.ts",
     "test": "NODE_ENV=test node --import remix/node-tsx --test",
     "typecheck": "tsc --noEmit"
-  },
-  "engines": {
-    "node": ">=24.3.0"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.8",
@@ -19,6 +21,11 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/ws": "^8.18.1",
+    "oxfmt": "0.63.0",
+    "oxlint": "1.78.0",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24.3.0"
   }
 }

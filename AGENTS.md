@@ -7,6 +7,9 @@ Radio is a single-room synchronized audio player built with Remix 3. Keep the se
 ```sh
 npm install
 npm run dev
+npm run format
+npm run lint
+npm run check
 npm run start
 npm test
 npm run typecheck
@@ -17,11 +20,10 @@ npm run typecheck
 - Follow `./.agents/skills/remix/SKILL.md` when changing routes, middleware, assets, UI, or tests.
 - The tracked skill is copied from the installed Remix CLI template and must stay aligned with the pinned `remix` version.
 - Before upgrading Remix, compare `.agents/skills/remix/` with `node_modules/@remix-run/cli/template/.agents/skills/remix/` and refresh the tracked copy together with any API migrations.
-- Remix is intentionally pinned to `3.0.0-beta.5`. The published beta.6 graph currently mixes incompatible `fetch-router` versions through its middleware packages; do not hide that mismatch with casts or package overrides.
 
 ## Beatsync Reference
 
-The synchronization design was derived from the MIT-licensed [freeman-jiang/beatsync](https://github.com/freeman-jiang/beatsync) project. The owner name includes a hyphen. Jack's historical fork is [jackharrhy/beatsync](https://github.com/jackharrhy/beatsync).
+The synchronization design was derived from the MIT-licensed [freeman-jiang/beatsync](https://github.com/freeman-jiang/beatsync) project.
 
 Keep an inspection-only clone at `./.upstream/beatsync`. That directory is ignored by Git and must not become a runtime dependency or an accidental nested repository in commits. Preserve applicable upstream attribution when adapting code.
 
@@ -44,8 +46,6 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
 - Keep theme tokens and reusable control/surface mixins there.
 - Keep radio layout and radio-only selectors with the hydrated radio feature.
 - Prefer native semantic elements plus Remix `mix` behavior over wrapper components that only pass props through.
-- Do not add an unpinned CDN stylesheet or another global UI dependency. New visual dependencies need a clear ownership and versioning story.
-- Add focus, disabled, and responsive behavior at the reusable style boundary when those states are shared.
 
 ## State And Deployment Boundaries
 
