@@ -1,40 +1,63 @@
 # Radio Agent Guide
 
-This app was scaffolded with `remix new`. Use these conventions when continuing to build it out.
+Radio is a single-room synchronized audio player built with Remix 3. Keep the server-rendered route correct first, then layer the hydrated WebSocket and Web Audio behavior on top.
 
 ## Commands
 
 ```sh
-npm i
+npm install
+npm run dev
 npm run start
 npm test
 npm run typecheck
 ```
 
-## Building Features
+## Remix Version Alignment
 
-Refer to ./.agents/skills/remix/SKILL.md
+- Follow `./.agents/skills/remix/SKILL.md` when changing routes, middleware, assets, UI, or tests.
+- The tracked skill is copied from the installed Remix CLI template and must stay aligned with the pinned `remix` version.
+- Before upgrading Remix, compare `.agents/skills/remix/` with `node_modules/@remix-run/cli/template/.agents/skills/remix/` and refresh the tracked copy together with any API migrations.
+- Remix is intentionally pinned to `3.0.0-beta.5`. The published beta.6 graph currently mixes incompatible `fetch-router` versions through its middleware packages; do not hide that mismatch with casts or package overrides.
 
-## Starter Layout
+## Beatsync Reference
 
-- `app/actions/controller.tsx` owns the top-level route actions
-- `app/routes.ts` defines the route contract
-- `app/router.ts` wires routes to route handlers
-- `app/middleware/render.tsx` installs the request-scoped renderer used by actions
-- `app/ui/` holds the shared document shell and home page UI
-- `app/assets.ts` owns the server-side asset pipeline used by the asset route and renderer
-- `public/` contains static files served from the app root
+The synchronization design was derived from the MIT-licensed [freeman-jiang/beatsync](https://github.com/freeman-jiang/beatsync) project. The owner name includes a hyphen. Jack's historical fork is [jackharrhy/beatsync](https://github.com/jackharrhy/beatsync).
 
-## Route Ownership
+Keep an inspection-only clone at `./.upstream/beatsync`. That directory is ignored by Git and must not become a runtime dependency or an accidental nested repository in commits. Preserve applicable upstream attribution when adapting code.
 
-- Start from `app/routes.ts` and map each route to the narrowest owner on disk.
-- Put top-level route actions in `app/actions/controller.tsx`.
-- Add `app/actions/<route-key>/controller.tsx` for nested route maps that need their own actions or middleware.
-- Keep route-owned page modules next to the route that owns them.
-- Move shared UI to `app/ui/`, not `app/actions/`.
+## Route And Runtime Ownership
 
-## Build-Out Notes
+- `app/routes.ts` is the URL contract.
+- `app/actions/controller.tsx` owns top-level HTTP responses.
+- `app/router.ts` composes middleware and maps the route contract.
+- `app/middleware/render.tsx` owns request-scoped server rendering.
+- `app/assets/` owns hydrated browser behavior and radio-specific client presentation.
+- `app/data/` owns the protocol, room state, persistence, upload storage, and WebSocket adapter.
+- `app/ui/` owns shared server UI and cross-route visual primitives.
 
-- This starter intentionally begins small; add directories like `app/data/` and `test/` only when you need them.
-- Prefer putting code in the narrowest owner before introducing shared modules.
-- Avoid generic dumping-ground directories like `app/lib/` or `app/components/`.
+Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` only when a nested route map needs its own actions or middleware. Do not create generic `app/lib/` or `app/components/` buckets.
+
+## Local UI Kit
+
+`app/ui/desktop/` is a deliberately small local UI kit, not a general design system.
+
+- Keep theme tokens and reusable control/surface mixins there.
+- Keep radio layout and radio-only selectors with the hydrated radio feature.
+- Prefer native semantic elements plus Remix `mix` behavior over wrapper components that only pass props through.
+- Do not add an unpinned CDN stylesheet or another global UI dependency. New visual dependencies need a clear ownership and versioning story.
+- Add focus, disabled, and responsive behavior at the reusable style boundary when those states are shared.
+
+## State And Deployment Boundaries
+
+- `public/uploads/` contains ignored local audio files.
+- `tmp/radio-state.json` contains ignored local queue and playback state.
+- The room and connected clients are process-local. The current model requires one process and persistent local storage.
+- The app is not ready for an unrestricted public URL: uploads and room mutations have no authentication or authorization yet.
+- Do not add deployment automation until the authentication boundary and storage topology are explicit.
+
+## Verification
+
+- Use route/server tests for HTTP and coordination behavior.
+- Use component tests only for DOM-specific behavior.
+- Add regression coverage for lifecycle, reconnect, synchronization, and persistence bugs.
+- Finish changes with `npm test`, `npm run typecheck`, `remix doctor`, and a production-mode smoke test.

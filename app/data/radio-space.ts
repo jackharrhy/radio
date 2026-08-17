@@ -78,7 +78,8 @@ export class RadioSpace {
   }
 
   connect(socket: RadioSocket, data: { clientId: string; name: string }): void {
-    let existing = this.clients.get(data.clientId)?.info
+    let existingConnection = this.clients.get(data.clientId)
+    let existing = existingConnection?.info
     let info: ClientInfo = {
       clientId: data.clientId,
       name: data.name || existing?.name || 'Someone',
@@ -89,6 +90,9 @@ export class RadioSpace {
       lastSeenAt: Date.now(),
     }
 
+    if (existingConnection && existingConnection.socket !== socket) {
+      existingConnection.socket.close()
+    }
     this.clients.set(data.clientId, { socket, info })
     this.startHeartbeat()
     this.send(socket, { type: 'ROOM_STATE', snapshot: this.snapshot() })
@@ -99,7 +103,13 @@ export class RadioSpace {
     }
   }
 
-  disconnect(clientId: string): void {
+  disconnect(clientId: string, socket: RadioSocket): void {
+    let connected = this.clients.get(clientId)
+    if (connected?.socket !== socket) return
+    this.dropClient(clientId)
+  }
+
+  private dropClient(clientId: string): void {
     this.clients.delete(clientId)
     if (this.pendingPlay) {
       this.pendingPlay.loadedClientIds.delete(clientId)
@@ -339,7 +349,7 @@ export class RadioSpace {
         let silentMs = now - client.info.lastSeenAt
         if (silentMs > (this.options.livenessReapAfterMs ?? DEFAULT_LIVENESS_REAP_AFTER_MS)) {
           client.socket.terminate()
-          this.disconnect(clientId)
+          this.dropClient(clientId)
         } else if (silentMs > (this.options.livenessPingAfterMs ?? DEFAULT_LIVENESS_PING_AFTER_MS)) {
           this.send(client.socket, { type: 'LIVENESS_PING' })
         }

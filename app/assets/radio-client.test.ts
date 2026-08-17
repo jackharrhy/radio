@@ -78,9 +78,13 @@ let originalWebSocket: typeof globalThis.WebSocket | undefined
 let originalWindow: typeof globalThis.window | undefined
 let originalFetch: typeof globalThis.fetch | undefined
 let sockets: FakeWebSocket[] = []
+let windowTimers = new Map<number, () => void>()
+let nextWindowTimerId = 1
 
 beforeEach(() => {
   sockets = []
+  windowTimers = new Map()
+  nextWindowTimerId = 1
   originalWebSocket = globalThis.WebSocket
   originalWindow = globalThis.window
   originalFetch = globalThis.fetch
@@ -93,8 +97,14 @@ beforeEach(() => {
   } as unknown as typeof WebSocket
 
   globalThis.window = {
-    setTimeout: globalThis.setTimeout.bind(globalThis),
-    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    setTimeout(callback: () => void) {
+      let id = nextWindowTimerId++
+      windowTimers.set(id, callback)
+      return id
+    },
+    clearTimeout(id: number) {
+      windowTimers.delete(id)
+    },
     setInterval: globalThis.setInterval.bind(globalThis),
     clearInterval: globalThis.clearInterval.bind(globalThis),
     location: { protocol: 'http:', host: 'localhost:44100' },
@@ -177,6 +187,55 @@ describe('RadioClient playback UI behavior', () => {
     client.syncNow()
 
     assert.equal((socket.sent[0] as { type: string }).type, 'NTP_REQUEST')
+    client.dispose()
+  })
+
+  it('does not reconnect after disposal', () => {
+    let audio = new FakeAudioManager()
+    let client = new RadioClient({ initialSnapshot: snapshot(), clientId: 'client-1', name: 'Ada', audioManager: audio })
+    client.connect()
+    let socket = sockets[0]
+    socket.emit('open')
+
+    assert.equal(windowTimers.size, 1)
+    client.dispose()
+    socket.emit('close')
+
+    assert.equal(windowTimers.size, 0)
+    assert.equal(sockets.length, 1)
+  })
+
+  it('does not report a failed track load as ready', async () => {
+    globalThis.fetch = async () => new Response(null, { status: 500 })
+    let audio = new FakeAudioManager()
+    let client = new RadioClient({ initialSnapshot: snapshot(), clientId: 'client-1', name: 'Ada', audioManager: audio })
+    client.connect()
+    let socket = sockets[0]
+    socket.emit('open')
+    socket.sent = []
+
+    socket.emit('message', message('LOAD_TRACK', { track: snapshot().tracks[0] }))
+    await flush()
+
+    assert.equal(socket.sent.some((value) => (value as { type?: string }).type === 'TRACK_READY'), false)
+    assert.equal(client.state.status, 'Could not load Track 1')
+    client.dispose()
+  })
+
+  it('surfaces an upload failure in client state', async () => {
+    globalThis.fetch = async () =>
+      Response.json({ error: 'Uploads are unavailable' }, { status: 503 })
+    let audio = new FakeAudioManager()
+    let client = new RadioClient({
+      initialSnapshot: snapshot(),
+      clientId: 'client-1',
+      name: 'Ada',
+      audioManager: audio,
+    })
+
+    await client.upload(new File(['audio'], 'track.mp3', { type: 'audio/mpeg' }))
+
+    assert.equal(client.state.status, 'Uploads are unavailable')
     client.dispose()
   })
 })

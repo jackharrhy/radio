@@ -9,14 +9,14 @@ export const NTP_CONSTANTS = {
   PROBE_GAP_TOLERANCE_MS: 5,
 } as const
 
-export interface Track {
+export type Track = {
   id: string
   title: string
   url: string
   addedAt: number
 }
 
-export interface ClientInfo {
+export type ClientInfo = {
   clientId: string
   name: string
   rtt: number
@@ -26,14 +26,14 @@ export interface ClientInfo {
   lastSeenAt: number
 }
 
-export interface PlaybackState {
+export type PlaybackState = {
   type: 'paused' | 'playing'
   trackId: string | null
   trackTimeSeconds: number
   serverTimeToExecute: number
 }
 
-export interface RoomSnapshot {
+export type RoomSnapshot = {
   roomId: typeof ROOM_ID
   tracks: Track[]
   clients: ClientInfo[]

@@ -22,6 +22,8 @@ export function attachRadioWebSocketServer(server: http.Server): WebSocketServer
   })
 
   wss.on('connection', (socket: AttachedSocket) => {
+    let radioSocket = wrapSocket(socket)
+
     socket.on('message', (raw) => {
       let t1 = epochNow()
       let parsedJson: unknown
@@ -41,8 +43,11 @@ export function attachRadioWebSocketServer(server: http.Server): WebSocketServer
       if (socket.radioClientId) radioSpace.markSeen(socket.radioClientId)
 
       if (message.type === 'JOIN') {
+        if (socket.radioClientId && socket.radioClientId !== message.clientId) {
+          radioSpace.disconnect(socket.radioClientId, radioSocket)
+        }
         socket.radioClientId = message.clientId
-        radioSpace.connect(wrapSocket(socket), { clientId: message.clientId, name: message.name })
+        radioSpace.connect(radioSocket, { clientId: message.clientId, name: message.name })
         return
       }
 
@@ -93,7 +98,7 @@ export function attachRadioWebSocketServer(server: http.Server): WebSocketServer
     })
 
     socket.on('close', () => {
-      if (socket.radioClientId) radioSpace.disconnect(socket.radioClientId)
+      if (socket.radioClientId) radioSpace.disconnect(socket.radioClientId, radioSocket)
     })
   })
 

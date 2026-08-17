@@ -13,12 +13,12 @@
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.8",
-    "remix": "^3.0.0-beta.5",
-    "ws": "^8.21.0"
+    "remix": "3.0.0-beta.5",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@types/node": "latest",
+    "@types/node": "^26.2.0",
     "@types/ws": "^8.18.1",
-    "typescript": "latest"
+    "typescript": "^7.0.2"
   }
 }

@@ -1,6 +1,8 @@
 import { layoutWithLines, prepareWithSegments } from '@chenglou/pretext'
 
-const TEXT_FONT = '14px ds-system, system-ui'
+import { DESKTOP_FONT_FAMILY } from '../ui/desktop/theme.ts'
+
+const TEXT_FONT = `14px ${DESKTOP_FONT_FAMILY}`
 
 export interface TextSurfaces {
   nowPlaying: number
@@ -30,7 +32,7 @@ export function fitFontSize(text: string, width: number, maxSize: number, minSiz
   if (normalized.length === 0 || width <= 0) return maxSize
 
   for (let size = maxSize; size >= minSize; size--) {
-    let prepared = prepareWithSegments(normalized, `${size}px ds-system, system-ui`)
+    let prepared = prepareWithSegments(normalized, `${size}px ${DESKTOP_FONT_FAMILY}`)
     let laidOut = layoutWithLines(prepared, width * 0.92, size)
     if (laidOut.lineCount <= 1) return size
   }

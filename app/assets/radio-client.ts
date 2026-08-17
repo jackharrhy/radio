@@ -52,6 +52,7 @@ export class RadioClient extends EventTarget {
   private currentTime = 0
   private reconnectTimer: number | null = null
   private progressTimer: number | null = null
+  private disposed = false
 
   state: RadioClientState
 
@@ -95,6 +96,7 @@ export class RadioClient extends EventTarget {
   }
 
   connect(): void {
+    if (this.disposed) return
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return
     this.socket = new WebSocket(getWsUrl())
     this.socket.addEventListener('open', () => {
@@ -108,16 +110,22 @@ export class RadioClient extends EventTarget {
     })
     this.socket.addEventListener('close', () => {
       this.stopHeartbeat()
+      if (this.disposed) return
       this.setState({ connected: false, synced: false, status: 'Disconnected. Reconnecting...' })
       this.scheduleReconnect()
     })
   }
 
   dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
     this.stopHeartbeat()
     this.stopProgressTimer()
     if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    this.stopSource()
     this.socket?.close()
+    this.socket = null
   }
 
   play(trackId?: string): void {
@@ -163,12 +171,17 @@ export class RadioClient extends EventTarget {
     let form = new FormData()
     form.set('track', file)
     this.setStatus(`Uploading ${file.name}...`)
-    let response = await fetch('/tracks', { method: 'POST', body: form })
-    if (!response.ok) {
-      let body = (await response.json().catch(() => null)) as { error?: string } | null
-      throw new Error(body?.error ?? 'Upload failed')
+    try {
+      let response = await fetch('/tracks', { method: 'POST', body: form })
+      if (!response.ok) {
+        let body = (await response.json().catch(() => null)) as { error?: string } | null
+        this.setStatus(body?.error ?? 'Upload failed')
+        return
+      }
+      this.setStatus('Upload complete')
+    } catch {
+      this.setStatus('Upload failed')
     }
-    this.setStatus('Upload complete')
   }
 
   private async handleMessage(message: ServerMessage): Promise<void> {
@@ -204,8 +217,9 @@ export class RadioClient extends EventTarget {
         break
       }
       case 'LOAD_TRACK':
-        await this.loadTrack(message.track)
-        this.send({ type: 'TRACK_READY', trackId: message.track.id })
+        if (await this.loadTrack(message.track)) {
+          this.send({ type: 'TRACK_READY', trackId: message.track.id })
+        }
         break
       case 'SCHEDULED_PLAY':
         await this.schedulePlay(message.trackId, message.trackTimeSeconds, message.serverTimeToExecute)
@@ -234,13 +248,23 @@ export class RadioClient extends EventTarget {
       return cached
     }
     this.setStatus(`Loading ${track.title}...`)
-    let response = await fetch(track.url)
-    if (!response.ok) return null
-    let buffer = await this.audio.decodeAudioData(await response.arrayBuffer())
-    this.buffers.set(track.id, buffer)
-    if (track.id === this.state.currentTrackId) this.setState({ durationSeconds: buffer.duration })
-    this.setStatus(`Loaded ${track.title}`)
-    return buffer
+    try {
+      let response = await fetch(track.url)
+      if (!response.ok) {
+        this.setStatus(`Could not load ${track.title}`)
+        return null
+      }
+      let buffer = await this.audio.decodeAudioData(await response.arrayBuffer())
+      this.buffers.set(track.id, buffer)
+      if (track.id === this.state.currentTrackId) {
+        this.setState({ durationSeconds: buffer.duration })
+      }
+      this.setStatus(`Loaded ${track.title}`)
+      return buffer
+    } catch {
+      this.setStatus(`Could not load ${track.title}`)
+      return null
+    }
   }
 
   private async schedulePlay(trackId: string, trackTimeSeconds: number, targetServerTime: number): Promise<void> {
@@ -368,7 +392,7 @@ export class RadioClient extends EventTarget {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer) return
+    if (this.disposed || this.reconnectTimer) return
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null
       this.connect()

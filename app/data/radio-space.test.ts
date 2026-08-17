@@ -65,7 +65,7 @@ describe('RadioSpace queue and playback coordination', () => {
     assert.equal(roomState.snapshot.clients[0]?.name, 'Ada')
     assert.equal(queueUpdates.at(-1)?.tracks[0]?.id, 'track-1')
 
-    room.disconnect('client-1')
+    room.disconnect('client-1', socket)
   })
 
   it('broadcasts LOAD_TRACK and waits for all connected clients before scheduling play', async () => {
@@ -102,9 +102,9 @@ describe('RadioSpace queue and playback coordination', () => {
     assert.equal(room.snapshot().playback.type, 'playing')
     assert.equal(room.snapshot().playback.trackId, 'track-1')
 
-    room.disconnect('client-1')
-    room.disconnect('client-2')
-    room.disconnect('client-3')
+    room.disconnect('client-1', client1)
+    room.disconnect('client-2', client2)
+    room.disconnect('client-3', client3)
   })
 
   it('is idempotent when the same client reports a track ready more than once', async () => {
@@ -125,8 +125,8 @@ describe('RadioSpace queue and playback coordination', () => {
 
     assert.equal(messagesOf(client1, 'SCHEDULED_PLAY').length, 1)
 
-    room.disconnect('client-1')
-    room.disconnect('client-2')
+    room.disconnect('client-1', client1)
+    room.disconnect('client-2', client2)
   })
 
   it('does not schedule play after a pending track is removed', async () => {
@@ -147,8 +147,24 @@ describe('RadioSpace queue and playback coordination', () => {
     assert.equal(messagesOf(client1, 'SCHEDULED_PLAY').length, 0)
     assert.equal(room.snapshot().playback.type, 'paused')
 
-    room.disconnect('client-1')
-    room.disconnect('client-2')
+    room.disconnect('client-1', client1)
+    room.disconnect('client-2', client2)
+  })
+
+  it('keeps a replacement connection when the previous socket closes', () => {
+    let room = createRoom()
+    let previousSocket = createSocket()
+    let replacementSocket = createSocket()
+
+    room.connect(previousSocket, { clientId: 'client-1', name: 'Ada' })
+    room.connect(replacementSocket, { clientId: 'client-1', name: 'Grace' })
+    room.disconnect('client-1', previousSocket)
+
+    assert.equal(previousSocket.readyState, 3)
+    assert.equal(room.snapshot().clients.length, 1)
+    assert.equal(room.snapshot().clients[0]?.name, 'Grace')
+
+    room.disconnect('client-1', replacementSocket)
   })
 })
 
