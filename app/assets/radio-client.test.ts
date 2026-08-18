@@ -146,6 +146,39 @@ async function flush(): Promise<void> {
 }
 
 describe("RadioClient playback UI behavior", () => {
+  it("loads a paused room's current track so a joining client can seek", async () => {
+    let audio = new FakeAudioManager();
+    let pausedSnapshot = snapshot();
+    pausedSnapshot.playback = {
+      type: "paused",
+      trackId: "track-1",
+      trackTimeSeconds: 37,
+      serverTimeToExecute: 0,
+    };
+    let client = new RadioClient({
+      initialSnapshot: pausedSnapshot,
+      clientId: "client-1",
+      name: "Ada",
+      audioManager: audio,
+    });
+    client.connect();
+    let socket = sockets[0];
+    socket.emit("open");
+    socket.sent = [];
+
+    socket.emit("message", message("ROOM_STATE", { snapshot: pausedSnapshot }));
+    await flush();
+
+    assert.equal(client.state.durationSeconds, 120);
+    client.seek(72.5);
+    assert.partialDeepEqual(socket.sent.at(-1), {
+      type: "PAUSE",
+      trackId: "track-1",
+      trackTimeSeconds: 72.5,
+    });
+    client.dispose();
+  });
+
   it("starts a different selected track from 0 instead of reusing current track position", async () => {
     let audio = new FakeAudioManager();
     let client = new RadioClient({

@@ -21,6 +21,7 @@ export function Document(handle: Handle<DocumentProps>) {
           <meta charSet="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+          <link rel="stylesheet" href="/fonts/material-symbols.css" />
           <title>{title}</title>
           {head}
         </head>

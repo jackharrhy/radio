@@ -1,9 +1,296 @@
 import { on, ref, type Handle } from "remix/ui";
 
 import type { Track } from "../data/protocol.ts";
-import { fitFontSize, fitText, getMaxTitleFontSize } from "./pretext-fit.ts";
+import {
+  fitFontSize,
+  fitText,
+  getMaxTitleFontSize,
+  getTextSurfaces,
+  normalizeText,
+} from "./pretext-fit.ts";
+import { AudioVisualizer, AudioVisualizerPreview } from "./audio-visualizer.tsx";
 import type { RadioClient, RadioClientState } from "./radio-client.ts";
 import { radioStyle } from "./radio-room-styles.ts";
+
+export function RadioGateView(
+  handle: Handle<{
+    nameInput: string;
+    onNameInput?: (value: string) => void;
+    onJoin?: () => void;
+  }>,
+) {
+  return () => (
+    <section mix={[radioStyle.window, radioStyle.gate]}>
+      <form
+        aria-label="Join radio"
+        mix={[
+          radioStyle.gateForm,
+          on("submit", (event) => {
+            event.preventDefault();
+            handle.props.onJoin?.();
+          }),
+        ]}
+      >
+        <input
+          aria-label="Name"
+          name="name"
+          type="text"
+          autocomplete="name"
+          placeholder="name"
+          value={handle.props.nameInput}
+          mix={[
+            radioStyle.input,
+            on("input", (event) => handle.props.onNameInput?.(event.currentTarget.value)),
+          ]}
+        />
+        <button aria-label="Join radio" mix={radioStyle.smallPrimaryButton} type="submit">
+          join radio
+        </button>
+      </form>
+    </section>
+  );
+}
+
+export function RadioPlayerView(
+  handle: Handle<{
+    state: RadioClientState;
+    client: RadioClient | null;
+    preview?: boolean;
+    viewportWidth: number;
+    onTrackInput?: (node: HTMLInputElement, signal: AbortSignal) => void;
+    onUploadSelected?: (input: HTMLInputElement) => void;
+    onAddTrack?: () => void;
+  }>,
+) {
+  let scrubPosition: number | null = null;
+  let pendingSeek: number | null = null;
+  let pointerScrubbing = false;
+  let scrubTrackId = handle.props.state.currentTrackId;
+
+  function stageSeek(position: number): void {
+    scrubPosition = position;
+    pendingSeek = position;
+    handle.update();
+  }
+
+  function commitSeek(): void {
+    if (pendingSeek === null) return;
+    let position = pendingSeek;
+    pendingSeek = null;
+    scrubPosition = null;
+    handle.props.client?.seek(position);
+    handle.update();
+  }
+
+  function getPointerPosition(event: PointerEvent & { currentTarget: HTMLInputElement }): number {
+    let bounds = event.currentTarget.getBoundingClientRect();
+    let ratio = bounds.width > 0 ? (event.clientX - bounds.left) / bounds.width : 0;
+    let duration = handle.props.state.durationSeconds;
+    let position = Math.max(0, Math.min(1, ratio)) * duration;
+    return Math.round(position * 10) / 10;
+  }
+
+  return () => {
+    let { state, client, preview = false, viewportWidth } = handle.props;
+    if (scrubTrackId !== state.currentTrackId) {
+      scrubTrackId = state.currentTrackId;
+      scrubPosition = null;
+      pendingSeek = null;
+    }
+
+    let currentTrack = state.tracks.find((track) => track.id === state.currentTrackId) ?? null;
+    let surface = getTextSurfaces(viewportWidth);
+    let currentTrackTitle = normalizeText(currentTrack?.title ?? "");
+    let displayedPosition = scrubPosition ?? state.positionSeconds;
+
+    return (
+      <section data-radio-shell="" mix={[radioStyle.window, radioStyle.shell]}>
+        <header mix={[radioStyle.titleBar, radioStyle.topBar]}>
+          <StatusPill state={state} />
+        </header>
+
+        <section
+          mix={[radioStyle.panel, radioStyle.nowPlaying]}
+          aria-busy={isLoading(state)}
+          data-empty={currentTrack === null ? "true" : "false"}
+          aria-label={currentTrack?.title ?? "Nothing playing"}
+        >
+          {!preview && client ? (
+            <AudioVisualizer
+              client={client}
+              playing={state.playing}
+              positionSeconds={state.positionSeconds}
+            />
+          ) : (
+            <AudioVisualizerPreview hasTrack={currentTrack !== null} playing={state.playing} />
+          )}
+          <div mix={radioStyle.trackMeta}>
+            {currentTrack ? (
+              <FittedTitle
+                text={currentTrackTitle}
+                title={currentTrack.title}
+                fallbackWidth={surface.nowPlaying}
+              />
+            ) : null}
+          </div>
+        </section>
+
+        <div mix={radioStyle.content}>
+          <section mix={[radioStyle.panel, radioStyle.queuePanel]}>
+            <div mix={radioStyle.sectionHeader}>
+              <h2>playlist</h2>
+              <input
+                mix={[
+                  radioStyle.fileInput,
+                  ref((node, signal) => handle.props.onTrackInput?.(node, signal)),
+                  on("change", (event) => handle.props.onUploadSelected?.(event.currentTarget)),
+                ]}
+                hidden={true}
+                name="track"
+                type="file"
+                accept="audio/*,video/webm"
+              />
+              <button
+                aria-label="Add track"
+                mix={[
+                  radioStyle.smallPrimaryButton,
+                  on("click", (event) => {
+                    event.preventDefault();
+                    handle.props.onAddTrack?.();
+                  }),
+                ]}
+                type="button"
+              >
+                upload track
+              </button>
+            </div>
+            <div mix={radioStyle.queueScroll}>
+              <TrackList
+                tracks={state.tracks}
+                currentTrackId={state.currentTrackId}
+                client={client}
+                surface={surface.queueTrack}
+              />
+            </div>
+          </section>
+
+          <aside mix={[radioStyle.panel, radioStyle.listeners]}>
+            <h2 mix={radioStyle.utilityTitle}>listeners</h2>
+            <ul mix={radioStyle.list}>
+              {state.clients.map((person) => (
+                <li key={person.clientId} mix={radioStyle.person}>
+                  <span>{person.name}</span>
+                  <small>{person.rtt ? `${Math.round(person.rtt)}ms` : "sync"}</small>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </div>
+
+        <footer mix={radioStyle.controlBar}>
+          <div mix={radioStyle.transport}>
+            <button
+              mix={[
+                radioStyle.playToggle,
+                on("click", () => (state.playing ? client?.pause() : client?.play())),
+              ]}
+              type="button"
+              disabled={!state.tracks.length}
+              aria-label={state.playing ? "Pause" : "Play"}
+              title={state.playing ? "Pause" : "Play"}
+            >
+              {state.playing ? "Pause" : "Play"}
+            </button>
+            <button
+              mix={[radioStyle.iconButton, on("click", () => void client?.wakeAudio())]}
+              type="button"
+              aria-label="Wake audio"
+              title="Wake audio"
+            >
+              Wake
+            </button>
+            <button
+              mix={[radioStyle.iconButton, on("click", () => client?.syncNow())]}
+              type="button"
+              disabled={!state.connected}
+              aria-label="Sync playback"
+              title="Sync playback"
+            >
+              Sync
+            </button>
+            <div mix={radioStyle.transportReadout}>
+              <span>{state.playing ? "playing" : "paused"}</span>
+            </div>
+          </div>
+          <label mix={radioStyle.seek}>
+            <span>{formatTime(displayedPosition)}</span>
+            <input
+              aria-label="Track position"
+              key={`${state.currentTrackId ?? "empty"}:${state.durationSeconds > 0 ? "ready" : "loading"}`}
+              type="range"
+              min="0"
+              max={String(Math.max(0, state.durationSeconds))}
+              step="0.1"
+              value={String(
+                Math.min(displayedPosition, state.durationSeconds || displayedPosition),
+              )}
+              disabled={!state.currentTrackId || state.durationSeconds <= 0}
+              mix={[
+                on("input", (event) => stageSeek(event.currentTarget.valueAsNumber)),
+                on("change", commitSeek),
+                on("pointerdown", (event) => {
+                  if (event.currentTarget.disabled) return;
+                  event.preventDefault();
+                  pointerScrubbing = true;
+                  event.currentTarget.focus();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  stageSeek(getPointerPosition(event));
+                }),
+                on("pointermove", (event) => {
+                  if (!pointerScrubbing) return;
+                  event.preventDefault();
+                  stageSeek(getPointerPosition(event));
+                }),
+                on("pointerup", (event) => {
+                  if (!pointerScrubbing) return;
+                  event.preventDefault();
+                  stageSeek(getPointerPosition(event));
+                  pointerScrubbing = false;
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                  commitSeek();
+                }),
+                on("pointercancel", () => {
+                  pointerScrubbing = false;
+                  scrubPosition = null;
+                  pendingSeek = null;
+                  handle.update();
+                }),
+                on("keyup", commitSeek),
+                on("blur", commitSeek),
+              ]}
+            />
+            <span>{state.durationSeconds > 0 ? formatTime(state.durationSeconds) : "--:--"}</span>
+          </label>
+          <label mix={radioStyle.volume}>
+            <span>vol</span>
+            <input
+              aria-label="Volume"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={String(state.volume)}
+              mix={on("input", (event) => client?.setVolume(event.currentTarget.valueAsNumber))}
+            />
+            <span>{Math.round(state.volume * 100)}</span>
+          </label>
+        </footer>
+      </section>
+    );
+  };
+}
 
 export function FittedTitle(
   handle: Handle<{ text: string; title?: string; fallbackWidth: number }>,
@@ -59,11 +346,7 @@ export function TrackList(
 ) {
   return () => {
     if (handle.props.tracks.length === 0) {
-      return (
-        <p mix={radioStyle.empty}>
-          Upload the first track. Everyone in the room shares this queue.
-        </p>
-      );
+      return null;
     }
 
     return (
@@ -90,10 +373,11 @@ export function TrackList(
               <button
                 type="button"
                 mix={[
-                  radioStyle.dangerButton,
+                  radioStyle.smallDangerButton,
                   on("click", () => handle.props.client?.removeTrack(track.id)),
                 ]}
                 aria-label={`Remove ${track.title}`}
+                title={`Remove ${track.title}`}
               >
                 Remove
               </button>
@@ -106,13 +390,32 @@ export function TrackList(
 }
 
 export function StatusPill(handle: Handle<{ state: RadioClientState }>) {
-  return () => (
-    <div mix={radioStyle.statusPill}>
-      <span>{handle.props.state.connected ? "online" : "offline"}</span>
-      <span>{handle.props.state.synced ? "synced" : "syncing"}</span>
-      <span>{Math.round(handle.props.state.rttMs)}ms</span>
-    </div>
-  );
+  return () => {
+    let state = handle.props.state;
+    let connection = state.connected ? "online" : "offline";
+    let synchronization = state.synced ? "synced" : "syncing";
+    let latency = `${Math.round(state.rttMs)}ms`;
+    let details = state.connected
+      ? `${connection} / ${synchronization} / ${latency}`
+      : `${connection} / ${synchronization}`;
+    let tone = !state.connected ? "offline" : state.synced ? "online" : "syncing";
+
+    return (
+      <output aria-label={details} data-tone={tone} mix={radioStyle.statusPill}>
+        <span aria-hidden="true">
+          <span>{connection}</span>
+          <i>/</i>
+          <span>{synchronization}</span>
+          {state.connected ? (
+            <>
+              <i>/</i>
+              <span>{latency}</span>
+            </>
+          ) : null}
+        </span>
+      </output>
+    );
+  };
 }
 
 export function formatTime(seconds: number): string {
@@ -123,10 +426,6 @@ export function formatTime(seconds: number): string {
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
-export function getPlaybackStatus(state: RadioClientState, hasCurrentTrack: boolean): string {
-  if (!hasCurrentTrack) return "waiting for a track";
-  if (state.status.toLowerCase().startsWith("loading")) return "loading audio";
-  if (!state.connected) return "offline";
-  if (!state.synced) return "syncing";
-  return state.playing ? "playing" : "paused";
+function isLoading(state: RadioClientState): boolean {
+  return state.status.toLowerCase().startsWith("loading");
 }

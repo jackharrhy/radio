@@ -52,8 +52,9 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
 - `public/uploads/` contains ignored local audio files.
 - `tmp/radio-state.json` contains ignored local queue and playback state.
 - The room and connected clients are process-local. The current model requires one process and persistent local storage.
-- The app is not ready for an unrestricted public URL: uploads and room mutations have no authentication or authorization yet.
-- Do not add deployment automation until the authentication boundary and storage topology are explicit.
+- The app is not ready for an unrestricted public URL: uploads and room mutations have no application-level authentication or authorization.
+- The approved production boundary is one container behind host-wide Traefik BasicAuth, including `/ws`, with persistent mounts at `/app/public/uploads` and `/app/tmp`.
+- Pushes to `main` publish the single-platform `linux/amd64` image as `ghcr.io/jackharrhy/radio:main`.
 
 ## Verification
 

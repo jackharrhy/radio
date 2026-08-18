@@ -4,13 +4,19 @@ import { desktopColor } from "./theme.ts";
 
 export const desktopControlStyle = {
   button: {
-    height: "28px",
+    boxSizing: "border-box",
+    height: "30px",
+    display: "inline-grid",
+    placeItems: "center",
+    padding: "0 10px",
     border: `1px solid ${desktopColor.ink}`,
     borderRadius: "3px",
     background: "linear-gradient(#fff, #d9e1e4)",
     color: desktopColor.ink,
     boxShadow: "0 1px #fff inset",
     font: "inherit",
+    lineHeight: 1,
+    verticalAlign: "middle",
     cursor: "pointer",
     "&:focus-visible": {
       outline: `2px solid ${desktopColor.accent}`,
@@ -28,33 +34,56 @@ export const desktopControlStyle = {
     "&::-webkit-slider-runnable-track": {
       height: "14px",
       border: `1px solid ${desktopColor.line}`,
-      background: `repeating-linear-gradient(90deg, #fff, #fff 8px, ${desktopColor.wash} 8px, ${desktopColor.wash} 10px)`,
+      borderRadius: "7px",
+      background: `linear-gradient(180deg, #c5d0d4 0%, #f9fbfb 48%, ${desktopColor.wash} 100%)`,
+      boxShadow: "0 1px 2px rgba(31, 42, 49, 0.18) inset",
     },
     "&::-webkit-slider-thumb": {
       appearance: "none",
       width: "14px",
       height: "18px",
-      marginTop: "-4px",
+      marginTop: "-3px",
       border: `1px solid ${desktopColor.ink}`,
-      background: desktopColor.accent,
+      borderRadius: "2px",
+      background: `linear-gradient(${desktopColor.accentSoft}, ${desktopColor.accent})`,
     },
     "&::-moz-range-track": {
       height: "14px",
       border: `1px solid ${desktopColor.line}`,
-      background: `repeating-linear-gradient(90deg, #fff, #fff 8px, ${desktopColor.wash} 8px, ${desktopColor.wash} 10px)`,
+      borderRadius: "7px",
+      background: `linear-gradient(180deg, #c5d0d4 0%, #f9fbfb 48%, ${desktopColor.wash} 100%)`,
+      boxShadow: "0 1px 2px rgba(31, 42, 49, 0.18) inset",
     },
     "&::-moz-range-thumb": {
       width: "14px",
       height: "18px",
       border: `1px solid ${desktopColor.ink}`,
-      borderRadius: 0,
-      background: desktopColor.accent,
+      borderRadius: "2px",
+      background: `linear-gradient(${desktopColor.accentSoft}, ${desktopColor.accent})`,
     },
     "&:focus-visible": {
       outline: `2px solid ${desktopColor.accent}`,
       outlineOffset: "2px",
     },
   },
+} as const;
+
+export const desktopSmallControlStyle = {
+  ...desktopControlStyle.button,
+  height: "24px",
+  padding: "0 7px",
+  fontSize: "12px",
+} as const;
+
+export const desktopIconStyle = {
+  fontFamily: '"Material Symbols Rounded"',
+  fontWeight: 400,
+  fontStyle: "normal",
+  lineHeight: 1,
+  letterSpacing: "normal",
+  textTransform: "none",
+  whiteSpace: "nowrap",
+  fontFeatureSettings: '"liga"',
 } as const;
 
 export const desktopStyle = {
@@ -104,10 +133,15 @@ export const desktopStyle = {
     ...desktopControlStyle.button,
     background: `linear-gradient(${desktopColor.accentSoft}, #9fdde6)`,
   }),
+  smallButton: css(desktopSmallControlStyle),
+  smallPrimaryButton: css({
+    ...desktopSmallControlStyle,
+    background: `linear-gradient(${desktopColor.accentSoft}, #9fdde6)`,
+  }),
   input: css({
     width: "100%",
     minWidth: 0,
-    height: "28px",
+    height: "30px",
     border: `1px solid ${desktopColor.ink}`,
     borderRadius: "3px",
     background: desktopColor.paper,

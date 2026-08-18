@@ -6,9 +6,7 @@ const TEXT_FONT = `14px ${DESKTOP_FONT_FAMILY}`;
 
 export interface TextSurfaces {
   nowPlaying: number;
-  status: number;
   queueTrack: number;
-  transportStatus: number;
 }
 
 export function getTextSurfaces(viewportWidth: number): TextSurfaces {
@@ -17,9 +15,7 @@ export function getTextSurfaces(viewportWidth: number): TextSurfaces {
   let queue = hasSidePanel ? shell - 240 - 32 : shell - 28;
   return {
     nowPlaying: viewportWidth <= 560 ? Math.max(180, shell - 112) : Math.max(220, shell - 48),
-    status: Math.max(180, shell - 48),
     queueTrack: Math.max(160, queue - 88),
-    transportStatus: Math.max(120, shell - 248),
   };
 }
 
@@ -29,7 +25,7 @@ export function getMaxTitleFontSize(width: number): number {
 
 export function fitFontSize(text: string, width: number, maxSize: number, minSize: number): number {
   let normalized = normalizeText(text);
-  if (normalized.length === 0 || width <= 0) return maxSize;
+  if (normalized.length === 0 || width <= 0 || !canMeasureText()) return maxSize;
 
   for (let size = maxSize; size >= minSize; size--) {
     let prepared = prepareWithSegments(normalized, `${size}px ${DESKTOP_FONT_FAMILY}`);
@@ -42,7 +38,7 @@ export function fitFontSize(text: string, width: number, maxSize: number, minSiz
 
 export function fitText(text: string, width: number, maxLines: number, font = TEXT_FONT): string {
   let normalized = normalizeText(text);
-  if (normalized.length === 0 || width <= 0) return normalized;
+  if (normalized.length === 0 || width <= 0 || !canMeasureText()) return normalized;
 
   let prepared = prepareWithSegments(normalized, font);
   let laidOut = layoutWithLines(prepared, width, 26);
@@ -79,4 +75,11 @@ function fitSingleLine(text: string, width: number, maxLines: number, font: stri
   }
 
   return best;
+}
+
+function canMeasureText(): boolean {
+  return (
+    typeof OffscreenCanvas !== "undefined" ||
+    (typeof document !== "undefined" && typeof document.createElement === "function")
+  );
 }

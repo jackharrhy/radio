@@ -9,6 +9,16 @@ interface AttachedSocket extends WebSocket {
   radioClientId?: string;
 }
 
+interface HttpServerLifecycle {
+  close(callback: (error?: Error) => void): unknown;
+  closeAllConnections(): void;
+}
+
+interface WebSocketServerLifecycle {
+  clients: Iterable<{ terminate(): void }>;
+  close(callback: (error?: Error) => void): void;
+}
+
 export function attachRadioWebSocketServer(server: http.Server): WebSocketServer {
   let wss = new WebSocketServer({ noServer: true });
 
@@ -103,6 +113,32 @@ export function attachRadioWebSocketServer(server: http.Server): WebSocketServer
   });
 
   return wss;
+}
+
+export async function closeRadioServer(
+  server: HttpServerLifecycle,
+  wss: WebSocketServerLifecycle,
+): Promise<void> {
+  let httpClosed = waitForClose(server);
+  let webSocketsClosed = waitForClose(wss);
+
+  for (let client of wss.clients) {
+    client.terminate();
+  }
+  server.closeAllConnections();
+
+  await Promise.all([httpClosed, webSocketsClosed]);
+}
+
+function waitForClose(target: {
+  close(callback: (error?: Error) => void): unknown;
+}): Promise<void> {
+  return new Promise((resolve, reject) => {
+    target.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 function wrapSocket(socket: WebSocket): RadioSocket {

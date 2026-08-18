@@ -1,7 +1,7 @@
 import * as http from "node:http";
 import { createRequestListener } from "remix/node-fetch-server";
 
-import { attachRadioWebSocketServer } from "./app/data/radio-ws.ts";
+import { attachRadioWebSocketServer, closeRadioServer } from "./app/data/radio-ws.ts";
 import { radioSpace } from "./app/data/radio-space.ts";
 import { router } from "./app/router.ts";
 
@@ -29,16 +29,35 @@ server.listen(port, () => {
 
 let shuttingDown = false;
 
-function shutdown() {
+async function shutdown(signal: NodeJS.Signals) {
   if (shuttingDown) {
-    return;
+    console.error(`Received ${signal} again; forcing shutdown.`);
+    process.exit(130);
   }
 
   shuttingDown = true;
-  radioWss.close();
-  server.close(() => process.exit(0));
-  server.closeAllConnections();
+  console.log(`Received ${signal}; shutting down.`);
+
+  let forceExitTimer = setTimeout(() => {
+    console.error("Graceful shutdown timed out; forcing shutdown.");
+    process.exit(1);
+  }, 5000);
+  forceExitTimer.unref();
+
+  try {
+    await closeRadioServer(server, radioWss);
+    clearTimeout(forceExitTimer);
+    process.exit(0);
+  } catch (error) {
+    clearTimeout(forceExitTimer);
+    console.error("Failed to shut down cleanly", error);
+    process.exit(1);
+  }
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
+});
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});

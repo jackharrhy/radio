@@ -7,14 +7,19 @@ export function isAudioContextPaused(
 class AudioContextManager {
   private context: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
   private wakeLock: WakeLockSentinel | null = null;
 
   getContext(): AudioContext {
     if (!this.context || this.context.state === "closed") {
       this.context = new AudioContext();
       this.masterGain = this.context.createGain();
+      this.analyser = this.context.createAnalyser();
+      this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.82;
       this.masterGain.gain.value = 1;
-      this.masterGain.connect(this.context.destination);
+      this.masterGain.connect(this.analyser);
+      this.analyser.connect(this.context.destination);
     }
     return this.context;
   }
@@ -22,6 +27,11 @@ class AudioContextManager {
   getInputNode(): AudioNode {
     if (!this.masterGain) this.getContext();
     return this.masterGain!;
+  }
+
+  getAnalyser(): AnalyserNode {
+    if (!this.analyser) this.getContext();
+    return this.analyser!;
   }
 
   async resume(): Promise<void> {

@@ -39,6 +39,7 @@ interface RadioAudioManager {
   createBufferSource(): AudioBufferSourceNode;
   getContext(): AudioContext;
   getInputNode(): AudioNode;
+  getAnalyser?(): AnalyserNode;
 }
 
 export class RadioClient extends EventTarget {
@@ -95,6 +96,10 @@ export class RadioClient extends EventTarget {
       (event) => listener((event as CustomEvent<RadioClientState>).detail),
       options,
     );
+  }
+
+  getAnalyser(): AnalyserNode | null {
+    return this.audio.getAnalyser?.() ?? null;
   }
 
   async wakeAudio(): Promise<void> {
@@ -195,16 +200,26 @@ export class RadioClient extends EventTarget {
   private async handleMessage(message: ServerMessage): Promise<void> {
     switch (message.type) {
       case "ROOM_STATE":
-        this.setState({
-          tracks: message.snapshot.tracks,
-          clients: message.snapshot.clients,
-          currentTrackId: message.snapshot.playback.trackId,
-          playing: message.snapshot.playback.type === "playing",
-          positionSeconds: message.snapshot.playback.trackTimeSeconds,
-          volume: message.snapshot.volume,
-        });
-        this.currentTime = message.snapshot.playback.trackTimeSeconds;
-        this.audio.setMasterGain(message.snapshot.volume, 0);
+        {
+          let previousTrackId = this.state.currentTrackId;
+          let nextTrackId = message.snapshot.playback.trackId;
+          let cachedBuffer = nextTrackId ? this.buffers.get(nextTrackId) : null;
+          this.setState({
+            tracks: message.snapshot.tracks,
+            clients: message.snapshot.clients,
+            currentTrackId: nextTrackId,
+            playing: message.snapshot.playback.type === "playing",
+            positionSeconds: message.snapshot.playback.trackTimeSeconds,
+            durationSeconds:
+              cachedBuffer?.duration ??
+              (nextTrackId === previousTrackId ? this.state.durationSeconds : 0),
+            volume: message.snapshot.volume,
+          });
+          this.currentTime = message.snapshot.playback.trackTimeSeconds;
+          this.audio.setMasterGain(message.snapshot.volume, 0);
+          let currentTrack = message.snapshot.tracks.find((track) => track.id === nextTrackId);
+          if (currentTrack) await this.loadTrack(currentTrack);
+        }
         break;
       case "PRESENCE":
         this.setState({ clients: message.clients });

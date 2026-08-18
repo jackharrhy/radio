@@ -1,0 +1,129 @@
+import * as assert from "remix/assert";
+import { it } from "remix/test";
+import type { Handle } from "remix/ui";
+
+import { ROOM_ID, type RoomSnapshot } from "../data/protocol.ts";
+import { RadioRoom } from "./radio-room.tsx";
+
+class FakeWebSocket extends EventTarget {
+  static CONNECTING = 0;
+  static OPEN = 1;
+
+  readyState = FakeWebSocket.CONNECTING;
+  closeCount = 0;
+
+  constructor(readonly url: string) {
+    super();
+  }
+
+  send(): void {}
+
+  close(): void {
+    this.closeCount++;
+    this.readyState = 3;
+  }
+}
+
+class FakeAudioContext {
+  currentTime = 0;
+  destination = {} as AudioDestinationNode;
+  state = "running" as AudioContextState;
+
+  createGain(): GainNode {
+    return {
+      connect() {},
+      gain: {
+        value: 1,
+        cancelScheduledValues() {},
+        linearRampToValueAtTime() {},
+        setValueAtTime() {},
+      },
+    } as unknown as GainNode;
+  }
+
+  createAnalyser(): AnalyserNode {
+    return {
+      connect() {},
+      fftSize: 0,
+      smoothingTimeConstant: 0,
+    } as unknown as AnalyserNode;
+  }
+}
+
+function snapshot(): RoomSnapshot {
+  return {
+    roomId: ROOM_ID,
+    tracks: [],
+    clients: [],
+    playback: { type: "paused", trackId: null, trackTimeSeconds: 0, serverTimeToExecute: 0 },
+    volume: 1,
+  };
+}
+
+it("keeps a connecting WebSocket alive across the initial component update", () => {
+  let originalAudioContext = globalThis.AudioContext;
+  let originalDocument = globalThis.document;
+  let originalLocalStorage = globalThis.localStorage;
+  let originalWebSocket = globalThis.WebSocket;
+  let originalWindow = globalThis.window;
+  let sockets: FakeWebSocket[] = [];
+  let storage = new Map([
+    ["radio.clientId", "client-1"],
+    ["radio.name", "Jack"],
+  ]);
+
+  try {
+    globalThis.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+    globalThis.document = {
+      documentElement: { clientWidth: 960 },
+    } as unknown as Document;
+    globalThis.localStorage = {
+      getItem(key: string) {
+        return storage.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        storage.set(key, value);
+      },
+    } as Storage;
+    globalThis.WebSocket = class extends FakeWebSocket {
+      constructor(url: string) {
+        super(url);
+        sockets.push(this);
+      }
+    } as unknown as typeof WebSocket;
+    globalThis.window = Object.assign(new EventTarget(), {
+      innerWidth: 960,
+      location: { protocol: "http:", host: "localhost:44100" },
+    }) as typeof window;
+
+    let componentController = new AbortController();
+    let queuedTask: ((signal: AbortSignal) => void) | undefined;
+    let handle = {
+      props: { initialSnapshot: snapshot() },
+      signal: componentController.signal,
+      queueTask(task: (signal: AbortSignal) => void) {
+        queuedTask = task;
+      },
+      update: async () => new AbortController().signal,
+    } as unknown as Handle<{ initialSnapshot: RoomSnapshot }>;
+
+    RadioRoom(handle);
+    if (!queuedTask) throw new Error("RadioRoom did not queue its initial task");
+
+    let renderController = new AbortController();
+    queuedTask(renderController.signal);
+    assert.equal(sockets.length, 1);
+
+    renderController.abort();
+    assert.equal(sockets[0].closeCount, 0);
+
+    componentController.abort();
+    assert.equal(sockets[0].closeCount, 1);
+  } finally {
+    globalThis.AudioContext = originalAudioContext;
+    globalThis.document = originalDocument;
+    globalThis.localStorage = originalLocalStorage;
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.window = originalWindow;
+  }
+});
