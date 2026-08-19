@@ -12,6 +12,12 @@ import {
   type Track,
 } from "./protocol.ts";
 import { calculateScheduleTimeMs, DEFAULT_CLIENT_RTT_MS } from "./timing.ts";
+import {
+  createRenamedTrack,
+  normalizeTrackTitle,
+  trackFilePath,
+  trackPartPath,
+} from "./track-files.ts";
 
 export interface RadioSocket {
   send(data: string): void;
@@ -46,6 +52,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 2500;
 
 interface RadioSpaceOptions {
   statePath?: string;
+  uploadDirectory?: string;
   persist?: boolean;
   audioLoadTimeoutMs?: number;
   livenessPingAfterMs?: number;
@@ -113,6 +120,7 @@ export class RadioSpace {
     this.clients.delete(clientId);
     if (this.pendingPlay) {
       this.pendingPlay.loadedClientIds.delete(clientId);
+      this.broadcastBuffering();
       this.maybeFlushPendingPlay();
     }
     if (this.clients.size === 0) this.stopHeartbeat();
@@ -152,6 +160,70 @@ export class RadioSpace {
     this.broadcast({ type: "QUEUE_UPDATED", tracks: this.tracks });
   }
 
+  getTrack(trackId: string): Track | null {
+    return this.tracks.find((candidate) => candidate.id === trackId) ?? null;
+  }
+
+  reportTrackUploadProgress(trackId: string, bytesReceived: number): void {
+    let track = this.getTrack(trackId);
+    if (!track?.upload || track.upload.status !== "uploading") return;
+    track.upload.bytesReceived = Math.max(
+      track.upload.bytesReceived,
+      Math.min(bytesReceived, track.upload.sizeBytes),
+    );
+    this.broadcast({ type: "QUEUE_UPDATED", tracks: this.tracks });
+  }
+
+  async completeTrackUpload(trackId: string): Promise<Track | null> {
+    let track = this.getTrack(trackId);
+    if (!track?.upload || track.upload.status !== "uploading") return null;
+    delete track.upload;
+    await this.saveState();
+    this.broadcast({ type: "QUEUE_UPDATED", tracks: this.tracks });
+    return track;
+  }
+
+  async failTrackUpload(trackId: string): Promise<void> {
+    let track = this.getTrack(trackId);
+    if (!track?.upload) return;
+    track.upload.status = "failed";
+    await this.saveState();
+    this.broadcast({ type: "QUEUE_UPDATED", tracks: this.tracks });
+  }
+
+  async renameTrack(clientId: string, trackId: string, requestedTitle: string): Promise<void> {
+    let track = this.getTrack(trackId);
+    if (!track) {
+      this.sendError(clientId, "Track no longer exists");
+      return;
+    }
+    if (track.upload) {
+      this.sendError(clientId, "Wait for the upload to finish before renaming");
+      return;
+    }
+
+    try {
+      let restartAt =
+        this.playback.type === "playing" && this.playback.trackId === trackId
+          ? this.playback.trackTimeSeconds +
+            Math.max(0, epochNow() - this.playback.serverTimeToExecute) / 1000
+          : null;
+      let title = normalizeTrackTitle(requestedTitle);
+      if (title === track.title) return;
+      let renamedTrack = createRenamedTrack(track, title);
+      await fs.rename(
+        trackFilePath(track, this.options.uploadDirectory),
+        trackFilePath(renamedTrack, this.options.uploadDirectory),
+      );
+      Object.assign(track, renamedTrack);
+      await this.saveState();
+      this.broadcast({ type: "QUEUE_UPDATED", tracks: this.tracks });
+      if (restartAt !== null) this.requestPlay(clientId, trackId, restartAt);
+    } catch (error) {
+      this.sendError(clientId, error instanceof Error ? error.message : "Could not rename track");
+    }
+  }
+
   async removeTrack(trackId: string): Promise<void> {
     let track = this.tracks.find((candidate) => candidate.id === trackId);
     this.tracks = this.tracks.filter((candidate) => candidate.id !== trackId);
@@ -165,8 +237,10 @@ export class RadioSpace {
     }
 
     if (track?.url.startsWith("/uploads/")) {
-      let filename = path.basename(track.url);
-      await fs.rm(path.join(process.cwd(), "public", "uploads", filename), { force: true });
+      await Promise.all([
+        fs.rm(trackFilePath(track, this.options.uploadDirectory), { force: true }),
+        fs.rm(trackPartPath(track, this.options.uploadDirectory), { force: true }),
+      ]);
     }
 
     await this.saveState();
@@ -188,6 +262,13 @@ export class RadioSpace {
       this.sendError(clientId, "Track no longer exists");
       return;
     }
+    if (track.upload) {
+      this.sendError(
+        clientId,
+        track.upload.status === "failed" ? "Upload failed" : "Track is uploading",
+      );
+      return;
+    }
 
     this.clearPendingPlay();
     let timer = setTimeout(
@@ -197,17 +278,51 @@ export class RadioSpace {
     this.pendingPlay = {
       trackId,
       trackTimeSeconds: Math.max(0, trackTimeSeconds),
-      loadedClientIds: new Set([clientId]),
+      loadedClientIds: new Set(),
       timer,
     };
     this.broadcast({ type: "LOAD_TRACK", track });
+    this.broadcastBuffering();
     this.maybeFlushPendingPlay();
   }
 
   markTrackReady(clientId: string, trackId: string): void {
     if (!this.pendingPlay || this.pendingPlay.trackId !== trackId) return;
     this.pendingPlay.loadedClientIds.add(clientId);
+    this.broadcastBuffering();
     this.maybeFlushPendingPlay();
+  }
+
+  async requestTrackEnded(
+    clientId: string,
+    trackId: string,
+    trackTimeSeconds: number,
+  ): Promise<void> {
+    if (this.playback.type !== "playing" || this.playback.trackId !== trackId) return;
+    if (this.pendingPlay) return;
+
+    let currentIndex = this.tracks.findIndex((track) => track.id === trackId);
+    if (currentIndex < 0) return;
+    let playableTracks = this.tracks.filter((track) => !track.upload);
+    let playableIndex = playableTracks.findIndex((track) => track.id === trackId);
+    let nextTrack =
+      playableTracks.length > 1 && playableIndex >= 0
+        ? playableTracks[(playableIndex + 1) % playableTracks.length]
+        : null;
+
+    this.playback = {
+      type: "paused",
+      trackId,
+      trackTimeSeconds: Math.max(0, trackTimeSeconds),
+      serverTimeToExecute: epochNow(),
+    };
+    await this.saveState();
+
+    if (nextTrack) {
+      this.requestPlay(clientId, nextTrack.id, 0);
+    } else {
+      this.broadcast({ type: "ROOM_STATE", snapshot: this.snapshot() });
+    }
   }
 
   async requestPause(trackId: string, trackTimeSeconds: number): Promise<void> {
@@ -249,7 +364,13 @@ export class RadioSpace {
     try {
       let raw = await fs.readFile(this.options.statePath ?? defaultStatePath, "utf8");
       let parsed = JSON.parse(raw) as Partial<PersistedState>;
-      this.tracks = Array.isArray(parsed.tracks) ? parsed.tracks : [];
+      this.tracks = Array.isArray(parsed.tracks)
+        ? parsed.tracks.map((track) =>
+            track.upload?.status === "uploading"
+              ? { ...track, upload: { ...track.upload, status: "failed" as const } }
+              : track,
+          )
+        : [];
       this.playback = parsed.playback ?? initialPlayback;
       this.volume = typeof parsed.volume === "number" ? parsed.volume : 1;
     } catch (error) {
@@ -291,6 +412,12 @@ export class RadioSpace {
     let pending = this.pendingPlay;
     this.pendingPlay = null;
     clearTimeout(pending.timer);
+    this.broadcast({
+      type: "TRACK_BUFFERING",
+      trackId: pending.trackId,
+      readyClientCount: pending.loadedClientIds.size,
+      totalClientCount: this.clients.size,
+    });
 
     let serverTimeToExecute = this.getScheduledExecutionTime();
     this.playback = {
@@ -312,6 +439,16 @@ export class RadioSpace {
     if (!this.pendingPlay) return;
     clearTimeout(this.pendingPlay.timer);
     this.pendingPlay = null;
+  }
+
+  private broadcastBuffering(): void {
+    if (!this.pendingPlay) return;
+    this.broadcast({
+      type: "TRACK_BUFFERING",
+      trackId: this.pendingPlay.trackId,
+      readyClientCount: this.pendingPlay.loadedClientIds.size,
+      totalClientCount: this.clients.size,
+    });
   }
 
   private syncLateClient(socket: RadioSocket): void {

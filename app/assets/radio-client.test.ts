@@ -31,52 +31,55 @@ class FakeWebSocket {
   }
 }
 
-class FakeSource {
-  buffer: AudioBuffer | null = null;
-  startedAt = 0;
-  offset = 0;
-  stoppedAt = 0;
-  private endedListeners = new Set<() => void>();
+class FakeMediaElement extends EventTarget {
+  src = "";
+  preload = "";
+  currentTime = 0;
+  duration = 120;
+  readyState = 0;
+  paused = true;
+  failLoad = false;
+  buffered = { length: 0, end: () => 0 } as unknown as TimeRanges;
 
-  connect(): void {}
-  disconnect(): void {}
-
-  addEventListener(type: string, listener: () => void): void {
-    if (type === "ended") this.endedListeners.add(listener);
+  load(): void {
+    if (!this.src) return;
+    queueMicrotask(() => {
+      if (this.failLoad) {
+        this.dispatchEvent(new Event("error"));
+        return;
+      }
+      this.readyState = 3;
+      this.dispatchEvent(new Event("loadedmetadata"));
+      this.dispatchEvent(new Event("canplay"));
+    });
   }
 
-  start(when = 0, offset = 0): void {
-    this.startedAt = when;
-    this.offset = offset;
+  async play(): Promise<void> {
+    this.paused = false;
+    this.dispatchEvent(new Event("playing"));
   }
 
-  stop(when = 0): void {
-    this.stoppedAt = when;
-    for (let listener of this.endedListeners) listener();
-    this.endedListeners.clear();
+  pause(): void {
+    this.paused = true;
+  }
+
+  removeAttribute(name: string): void {
+    if (name === "src") this.src = "";
+  }
+
+  end(): void {
+    this.currentTime = this.duration;
+    this.paused = true;
+    this.dispatchEvent(new Event("ended"));
   }
 }
 
 class FakeAudioManager {
-  currentTime = 0;
-  sources: FakeSource[] = [];
+  media = new FakeMediaElement();
 
   async resume(): Promise<void> {}
   setMasterGain(): void {}
-  getInputNode(): AudioNode {
-    return {} as AudioNode;
-  }
-  getContext(): AudioContext {
-    return { currentTime: this.currentTime } as AudioContext;
-  }
-  createBufferSource(): AudioBufferSourceNode {
-    let source = new FakeSource();
-    this.sources.push(source);
-    return source as unknown as AudioBufferSourceNode;
-  }
-  async decodeAudioData(): Promise<AudioBuffer> {
-    return { duration: 120 } as AudioBuffer;
-  }
+  connectMediaElement(): void {}
 }
 
 let originalWebSocket: typeof globalThis.WebSocket | undefined;
@@ -160,6 +163,7 @@ describe("RadioClient playback UI behavior", () => {
       clientId: "client-1",
       name: "Ada",
       audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
     });
     client.connect();
     let socket = sockets[0];
@@ -170,6 +174,23 @@ describe("RadioClient playback UI behavior", () => {
     await flush();
 
     assert.equal(client.state.durationSeconds, 120);
+    assert.equal(audio.media.currentTime, 37);
+
+    let renamedTrack = {
+      ...pausedSnapshot.tracks[0],
+      title: "Renamed track",
+      url: "/uploads/track-1-Renamed-track.mp3",
+    };
+    socket.emit(
+      "message",
+      message("QUEUE_UPDATED", {
+        tracks: [renamedTrack, pausedSnapshot.tracks[1]],
+      }),
+    );
+    await flush();
+    assert.equal(audio.media.src, renamedTrack.url);
+    assert.equal(audio.media.currentTime, 37);
+
     client.seek(72.5);
     assert.partialDeepEqual(socket.sent.at(-1), {
       type: "PAUSE",
@@ -186,6 +207,7 @@ describe("RadioClient playback UI behavior", () => {
       clientId: "client-1",
       name: "Ada",
       audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
     });
     client.connect();
     let socket = sockets[0];
@@ -213,13 +235,14 @@ describe("RadioClient playback UI behavior", () => {
     client.dispose();
   });
 
-  it("does not mark a paused track as ended when Web Audio fires ended after stop", async () => {
+  it("does not report a paused track as naturally ended", async () => {
     let audio = new FakeAudioManager();
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
       name: "Ada",
       audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
     });
     client.connect();
     let socket = sockets[0];
@@ -242,10 +265,49 @@ describe("RadioClient playback UI behavior", () => {
         serverTimeToExecute: performance.timeOrigin + performance.now(),
       }),
     );
+    await flush();
+    audio.media.end();
 
     assert.equal(client.state.playing, false);
     assert.equal(client.state.positionSeconds, 12);
     assert.equal(client.state.durationSeconds, 120);
+    assert.equal(
+      socket.sent.some((value) => (value as { type?: string }).type === "TRACK_ENDED"),
+      false,
+    );
+    client.dispose();
+  });
+
+  it("reports a natural media ending so the server can advance the queue", async () => {
+    let audio = new FakeAudioManager();
+    let client = new RadioClient({
+      initialSnapshot: snapshot(),
+      clientId: "client-1",
+      name: "Ada",
+      audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
+    });
+    client.connect();
+    let socket = sockets[0];
+    socket.emit("open");
+
+    socket.emit(
+      "message",
+      message("SCHEDULED_PLAY", {
+        trackId: "track-1",
+        trackTimeSeconds: 0,
+        serverTimeToExecute: performance.timeOrigin + performance.now(),
+      }),
+    );
+    await flush();
+    socket.sent = [];
+    audio.media.end();
+
+    assert.partialDeepEqual(socket.sent.at(-1), {
+      type: "TRACK_ENDED",
+      trackId: "track-1",
+      trackTimeSeconds: 120,
+    });
     client.dispose();
   });
 
@@ -256,6 +318,7 @@ describe("RadioClient playback UI behavior", () => {
       clientId: "client-1",
       name: "Ada",
       audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
     });
     client.connect();
     let socket = sockets[0];
@@ -275,6 +338,7 @@ describe("RadioClient playback UI behavior", () => {
       clientId: "client-1",
       name: "Ada",
       audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
     });
     client.connect();
     let socket = sockets[0];
@@ -289,13 +353,14 @@ describe("RadioClient playback UI behavior", () => {
   });
 
   it("does not report a failed track load as ready", async () => {
-    globalThis.fetch = async () => new Response(null, { status: 500 });
     let audio = new FakeAudioManager();
+    audio.media.failLoad = true;
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
       name: "Ada",
       audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
     });
     client.connect();
     let socket = sockets[0];
@@ -322,11 +387,89 @@ describe("RadioClient playback UI behavior", () => {
       clientId: "client-1",
       name: "Ada",
       audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
     });
 
     await client.upload(new File(["audio"], "track.mp3", { type: "audio/mpeg" }));
 
     assert.equal(client.state.status, "Uploads are unavailable");
+    client.dispose();
+  });
+
+  it("adds an uploading row immediately and updates byte progress", async () => {
+    let pendingTrack = {
+      id: "track-upload",
+      title: "Long mix",
+      url: "/uploads/track-upload-Long-mix.mp3",
+      addedAt: 3,
+      mediaType: "audio/mpeg",
+      upload: {
+        status: "uploading" as const,
+        bytesReceived: 0,
+        sizeBytes: 10,
+      },
+    };
+    globalThis.fetch = async () => Response.json({ track: pendingTrack }, { status: 201 });
+    let audio = new FakeAudioManager();
+    let sawHalfUploaded = false;
+    let client!: RadioClient;
+    client = new RadioClient({
+      initialSnapshot: snapshot(),
+      clientId: "client-1",
+      name: "Ada",
+      audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
+      uploadContent: async ({ onProgress }) => {
+        onProgress({ bytesSent: 5, sizeBytes: 10 });
+        sawHalfUploaded =
+          client.state.tracks.find((track) => track.id === pendingTrack.id)?.upload
+            ?.bytesReceived === 5;
+        let { upload: _upload, ...completedTrack } = pendingTrack;
+        return completedTrack;
+      },
+    });
+
+    await client.upload(new File(["0123456789"], "Long mix.mp3", { type: "audio/mpeg" }));
+
+    assert.equal(sawHalfUploaded, true);
+    assert.equal(client.state.tracks.at(-1)?.upload, undefined);
+    assert.equal(client.state.status, "Upload complete");
+    client.dispose();
+  });
+
+  it("sends rename commands and exposes client buffering counts", async () => {
+    let audio = new FakeAudioManager();
+    let client = new RadioClient({
+      initialSnapshot: snapshot(),
+      clientId: "client-1",
+      name: "Ada",
+      audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
+    });
+    client.connect();
+    let socket = sockets[0];
+    socket.emit("open");
+    socket.sent = [];
+
+    client.renameTrack("track-1", "New title");
+    assert.partialDeepEqual(socket.sent.at(-1), {
+      type: "RENAME_TRACK",
+      trackId: "track-1",
+      title: "New title",
+    });
+
+    socket.emit(
+      "message",
+      message("TRACK_BUFFERING", {
+        trackId: "track-1",
+        readyClientCount: 1,
+        totalClientCount: 3,
+      }),
+    );
+    await flush();
+    assert.equal(client.state.bufferingTrackId, "track-1");
+    assert.equal(client.state.readyClientCount, 1);
+    assert.equal(client.state.totalClientCount, 3);
     client.dispose();
   });
 });

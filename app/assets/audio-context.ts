@@ -9,6 +9,7 @@ class AudioContextManager {
   private masterGain: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private wakeLock: WakeLockSentinel | null = null;
+  private connectedMedia = new WeakSet<HTMLMediaElement>();
 
   getContext(): AudioContext {
     if (!this.context || this.context.state === "closed") {
@@ -22,11 +23,6 @@ class AudioContextManager {
       this.analyser.connect(this.context.destination);
     }
     return this.context;
-  }
-
-  getInputNode(): AudioNode {
-    if (!this.masterGain) this.getContext();
-    return this.masterGain!;
   }
 
   getAnalyser(): AnalyserNode {
@@ -49,12 +45,11 @@ class AudioContextManager {
     gain.gain.linearRampToValueAtTime(clamped, context.currentTime + rampTime);
   }
 
-  createBufferSource(): AudioBufferSourceNode {
-    return this.getContext().createBufferSource();
-  }
-
-  async decodeAudioData(buffer: ArrayBuffer): Promise<AudioBuffer> {
-    return await this.getContext().decodeAudioData(buffer);
+  connectMediaElement(element: HTMLMediaElement): void {
+    if (this.connectedMedia.has(element)) return;
+    let source = this.getContext().createMediaElementSource(element);
+    source.connect(this.masterGain!);
+    this.connectedMedia.add(element);
   }
 
   private async requestWakeLock(): Promise<void> {

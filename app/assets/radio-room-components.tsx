@@ -165,12 +165,7 @@ export function RadioPlayerView(
               </button>
             </div>
             <div mix={radioStyle.queueScroll}>
-              <TrackList
-                tracks={state.tracks}
-                currentTrackId={state.currentTrackId}
-                client={client}
-                surface={surface.queueTrack}
-              />
+              <TrackList state={state} client={client} surface={surface.queueTrack} />
             </div>
           </section>
 
@@ -195,7 +190,7 @@ export function RadioPlayerView(
                 on("click", () => (state.playing ? client?.pause() : client?.play())),
               ]}
               type="button"
-              disabled={!state.tracks.length}
+              disabled={!state.tracks.some((track) => !track.upload)}
               aria-label={state.playing ? "Pause" : "Play"}
               title={state.playing ? "Pause" : "Play"}
             >
@@ -338,38 +333,128 @@ export function FittedTitle(
 
 export function TrackList(
   handle: Handle<{
-    tracks: Track[];
-    currentTrackId: string | null;
+    state: RadioClientState;
     client: RadioClient | null;
     surface: number;
   }>,
 ) {
+  let editingTrackId: string | null = null;
+  let draftTitle = "";
+
+  function beginRename(track: Track): void {
+    if (track.upload) return;
+    editingTrackId = track.id;
+    draftTitle = track.title;
+    handle.update();
+  }
+
+  function cancelRename(): void {
+    editingTrackId = null;
+    draftTitle = "";
+    handle.update();
+  }
+
+  function commitRename(track: Track): void {
+    if (editingTrackId !== track.id) return;
+    let nextTitle = draftTitle.trim();
+    editingTrackId = null;
+    draftTitle = "";
+    if (nextTitle && nextTitle !== track.title) {
+      handle.props.client?.renameTrack(track.id, nextTitle);
+    }
+    handle.update();
+  }
+
   return () => {
-    if (handle.props.tracks.length === 0) {
+    let { state } = handle.props;
+    if (state.tracks.length === 0) {
       return null;
     }
 
     return (
       <ol mix={radioStyle.queueList}>
-        {handle.props.tracks.map((track, index) => {
-          let active = track.id === handle.props.currentTrackId;
+        {state.tracks.map((track, index) => {
+          let active = track.id === state.currentTrackId;
+          let uploadPercent = track.upload
+            ? Math.round((track.upload.bytesReceived / track.upload.sizeBytes) * 100)
+            : null;
+          let distribution =
+            state.bufferingTrackId === track.id && state.totalClientCount > 0
+              ? `${state.readyClientCount}/${state.totalClientCount}`
+              : null;
+          let browserBuffer =
+            active &&
+            state.durationSeconds > 0 &&
+            state.bufferedSeconds > 0 &&
+            state.bufferedSeconds < state.durationSeconds * 0.98
+              ? `${Math.round((state.bufferedSeconds / state.durationSeconds) * 100)}%`
+              : null;
+          let status = track.upload
+            ? track.upload.status === "failed"
+              ? "failed"
+              : `↑ ${uploadPercent}%`
+            : (distribution ?? (browserBuffer ? `buf ${browserBuffer}` : null));
           return (
             <li
               key={track.id}
               mix={[radioStyle.queueItem, active ? radioStyle.activeQueueItem : null]}
+              data-upload-status={track.upload?.status}
             >
+              {track.upload?.status === "uploading" ? (
+                <span
+                  aria-hidden="true"
+                  mix={radioStyle.trackProgress}
+                  style={{ width: `${uploadPercent}%` }}
+                />
+              ) : null}
               <button
                 type="button"
                 mix={[
                   radioStyle.trackButton,
                   on("click", () => handle.props.client?.play(track.id)),
                 ]}
+                disabled={Boolean(track.upload)}
               >
                 <span mix={radioStyle.queueIndex}>{String(index + 1).padStart(2, "0")}</span>
                 <span mix={radioStyle.queueTrack} title={track.title}>
-                  {fitText(track.title, handle.props.surface, 1)}
+                  <span>{fitText(track.title, handle.props.surface, 1)}</span>
+                  {status ? <small>{status}</small> : null}
                 </span>
               </button>
+              {editingTrackId === track.id ? (
+                <input
+                  aria-label={`Rename ${track.title}`}
+                  mix={[
+                    radioStyle.input,
+                    radioStyle.queueEditInput,
+                    on("input", (event) => {
+                      draftTitle = event.currentTarget.value;
+                    }),
+                    on("keydown", (event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitRename(track);
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelRename();
+                      }
+                    }),
+                    on("blur", () => commitRename(track)),
+                  ]}
+                  value={draftTitle}
+                  autofocus={true}
+                />
+              ) : (
+                <button
+                  type="button"
+                  mix={[radioStyle.smallEditButton, on("click", () => beginRename(track))]}
+                  disabled={Boolean(track.upload)}
+                  aria-label={`Rename ${track.title}`}
+                  title={`Rename ${track.title}`}
+                >
+                  Rename
+                </button>
+              )}
               <button
                 type="button"
                 mix={[
@@ -427,5 +512,5 @@ export function formatTime(seconds: number): string {
 }
 
 function isLoading(state: RadioClientState): boolean {
-  return state.status.toLowerCase().startsWith("loading");
+  return state.status.toLowerCase().startsWith("buffering");
 }

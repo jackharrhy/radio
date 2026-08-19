@@ -15,7 +15,8 @@ import {
   sendProbePair,
   type NtpMeasurement,
 } from "./radio-sync.ts";
-import { getWsUrl } from "./urls.ts";
+import { uploadTrackContent, type UploadProgress } from "./upload-track.ts";
+import { getTrackContentUrl, getTrackCreateUrl, getWsUrl } from "./urls.ts";
 
 export interface RadioClientState {
   connected: boolean;
@@ -25,6 +26,10 @@ export interface RadioClientState {
   tracks: Track[];
   clients: ClientInfo[];
   currentTrackId: string | null;
+  bufferingTrackId: string | null;
+  readyClientCount: number;
+  totalClientCount: number;
+  bufferedSeconds: number;
   playing: boolean;
   positionSeconds: number;
   durationSeconds: number;
@@ -35,29 +40,38 @@ export interface RadioClientState {
 interface RadioAudioManager {
   resume(): Promise<void>;
   setMasterGain(value: number, rampTime?: number): void;
-  decodeAudioData(buffer: ArrayBuffer): Promise<AudioBuffer>;
-  createBufferSource(): AudioBufferSourceNode;
-  getContext(): AudioContext;
-  getInputNode(): AudioNode;
+  connectMediaElement(element: HTMLMediaElement): void;
   getAnalyser?(): AnalyserNode;
 }
+
+type UploadContent = (options: {
+  url: string;
+  file: File;
+  signal: AbortSignal;
+  onProgress: (progress: UploadProgress) => void;
+}) => Promise<Track>;
 
 export class RadioClient extends EventTarget {
   private socket: WebSocket | null = null;
   private measurements: NtpMeasurement[] = [];
   private heartbeatTimer: number | null = null;
-  private buffers = new Map<string, AudioBuffer>();
-  private sourceNode: AudioBufferSourceNode | null = null;
-  private playbackStartTime = 0;
-  private playbackOffset = 0;
-  private currentTime = 0;
   private reconnectTimer: number | null = null;
   private progressTimer: number | null = null;
+  private scheduledActionTimer: number | null = null;
+  private currentTime = 0;
+  private loadedTrackId: string | null = null;
+  private loadedTrackUrl: string | null = null;
+  private loadAbort: AbortController | null = null;
+  private loadPromise: Promise<boolean> | null = null;
+  private mediaEvents = new AbortController();
+  private uploadControllers = new Set<AbortController>();
   private disposed = false;
 
   state: RadioClientState;
 
   private readonly audio: RadioAudioManager;
+  private readonly media: HTMLMediaElement;
+  private readonly uploadContent: UploadContent;
 
   constructor(
     private readonly options: {
@@ -65,10 +79,17 @@ export class RadioClient extends EventTarget {
       clientId: string;
       name: string;
       audioManager?: RadioAudioManager;
+      mediaElement?: HTMLMediaElement;
+      uploadContent?: UploadContent;
     },
   ) {
     super();
     this.audio = options.audioManager ?? audioContextManager;
+    this.media = options.mediaElement ?? document.createElement("audio");
+    this.uploadContent = options.uploadContent ?? uploadTrackContent;
+    this.media.preload = "auto";
+    this.audio.connectMediaElement(this.media);
+    this.bindMediaEvents();
     this.state = {
       connected: false,
       synced: false,
@@ -77,6 +98,10 @@ export class RadioClient extends EventTarget {
       tracks: options.initialSnapshot.tracks,
       clients: options.initialSnapshot.clients,
       currentTrackId: options.initialSnapshot.playback.trackId,
+      bufferingTrackId: null,
+      readyClientCount: 0,
+      totalClientCount: 0,
+      bufferedSeconds: 0,
       playing: options.initialSnapshot.playback.type === "playing",
       positionSeconds: options.initialSnapshot.playback.trackTimeSeconds,
       durationSeconds: 0,
@@ -133,16 +158,29 @@ export class RadioClient extends EventTarget {
     this.disposed = true;
     this.stopHeartbeat();
     this.stopProgressTimer();
+    this.clearScheduledAction();
+    this.loadAbort?.abort();
+    this.mediaEvents.abort();
+    for (let controller of this.uploadControllers) controller.abort();
+    this.uploadControllers.clear();
     if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
-    this.stopSource();
+    this.media.pause();
+    this.media.removeAttribute("src");
+    this.media.load();
     this.socket?.close();
     this.socket = null;
   }
 
   play(trackId?: string): void {
-    let nextTrackId = trackId ?? this.state.currentTrackId ?? this.state.tracks[0]?.id;
+    let fallbackTrack = this.state.tracks.find((track) => !track.upload);
+    let nextTrackId = trackId ?? this.state.currentTrackId ?? fallbackTrack?.id;
     if (!nextTrackId) return;
+    let track = this.state.tracks.find((candidate) => candidate.id === nextTrackId);
+    if (track?.upload) {
+      this.setStatus(track.upload.status === "failed" ? "Upload failed" : "Track is uploading");
+      return;
+    }
     let trackTimeSeconds =
       nextTrackId === this.state.currentTrackId ? this.getCurrentTrackPosition() : 0;
     this.send({ type: "PLAY", trackId: nextTrackId, trackTimeSeconds });
@@ -156,6 +194,12 @@ export class RadioClient extends EventTarget {
 
   removeTrack(trackId: string): void {
     this.send({ type: "REMOVE_TRACK", trackId });
+  }
+
+  renameTrack(trackId: string, title: string): void {
+    let normalizedTitle = title.trim();
+    if (!normalizedTitle) return;
+    this.send({ type: "RENAME_TRACK", trackId, title: normalizedTitle });
   }
 
   setVolume(volume: number): void {
@@ -172,6 +216,7 @@ export class RadioClient extends EventTarget {
     if (!trackId) return;
     let boundedTime = this.boundTrackTime(trackTimeSeconds);
     this.currentTime = boundedTime;
+    this.setMediaTime(boundedTime);
     this.setState({ positionSeconds: boundedTime });
     if (this.state.playing) {
       this.send({ type: "PLAY", trackId, trackTimeSeconds: boundedTime });
@@ -181,52 +226,92 @@ export class RadioClient extends EventTarget {
   }
 
   async upload(file: File): Promise<void> {
-    let form = new FormData();
-    form.set("track", file);
     this.setStatus(`Uploading ${file.name}...`);
+    let controller = new AbortController();
+    this.uploadControllers.add(controller);
+    let trackId: string | null = null;
+
     try {
-      let response = await fetch("/tracks", { method: "POST", body: form });
-      if (!response.ok) {
-        let body = (await response.json().catch(() => null)) as { error?: string } | null;
-        this.setStatus(body?.error ?? "Upload failed");
-        return;
+      let response = await fetch(getTrackCreateUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: file.name,
+          mediaType: file.type,
+          sizeBytes: file.size,
+        }),
+        signal: controller.signal,
+      });
+      let body = (await response.json().catch(() => null)) as {
+        track?: Track;
+        error?: string;
+      } | null;
+      if (!response.ok || !body?.track) {
+        throw new Error(body?.error ?? "Upload failed");
       }
+
+      let pendingTrack = body.track;
+      trackId = pendingTrack.id;
+      this.mergeTrack(pendingTrack);
+      let completedTrack = await this.uploadContent({
+        url: getTrackContentUrl(pendingTrack.id),
+        file,
+        signal: controller.signal,
+        onProgress: ({ bytesSent }) => this.updateUploadProgress(pendingTrack.id, bytesSent),
+      });
+      this.mergeTrack(completedTrack);
       this.setStatus("Upload complete");
-    } catch {
-      this.setStatus("Upload failed");
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (trackId) this.markUploadFailed(trackId);
+      this.setStatus(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      this.uploadControllers.delete(controller);
     }
   }
 
   private async handleMessage(message: ServerMessage): Promise<void> {
     switch (message.type) {
-      case "ROOM_STATE":
-        {
-          let previousTrackId = this.state.currentTrackId;
-          let nextTrackId = message.snapshot.playback.trackId;
-          let cachedBuffer = nextTrackId ? this.buffers.get(nextTrackId) : null;
-          this.setState({
-            tracks: message.snapshot.tracks,
-            clients: message.snapshot.clients,
-            currentTrackId: nextTrackId,
-            playing: message.snapshot.playback.type === "playing",
-            positionSeconds: message.snapshot.playback.trackTimeSeconds,
-            durationSeconds:
-              cachedBuffer?.duration ??
-              (nextTrackId === previousTrackId ? this.state.durationSeconds : 0),
-            volume: message.snapshot.volume,
-          });
-          this.currentTime = message.snapshot.playback.trackTimeSeconds;
-          this.audio.setMasterGain(message.snapshot.volume, 0);
-          let currentTrack = message.snapshot.tracks.find((track) => track.id === nextTrackId);
-          if (currentTrack) await this.loadTrack(currentTrack);
+      case "ROOM_STATE": {
+        let nextTrackId = message.snapshot.playback.trackId;
+        let currentTrack = message.snapshot.tracks.find((track) => track.id === nextTrackId);
+        let keepsLoadedTrack =
+          currentTrack !== undefined &&
+          currentTrack.id === this.loadedTrackId &&
+          currentTrack.url === this.loadedTrackUrl;
+        this.setState({
+          tracks: message.snapshot.tracks,
+          clients: message.snapshot.clients,
+          currentTrackId: nextTrackId,
+          playing: message.snapshot.playback.type === "playing",
+          positionSeconds: message.snapshot.playback.trackTimeSeconds,
+          durationSeconds: keepsLoadedTrack ? this.mediaDuration() : 0,
+          volume: message.snapshot.volume,
+        });
+        this.currentTime = message.snapshot.playback.trackTimeSeconds;
+        this.audio.setMasterGain(message.snapshot.volume, 0);
+        if (currentTrack && !currentTrack.upload && (await this.loadTrack(currentTrack))) {
+          this.setMediaTime(message.snapshot.playback.trackTimeSeconds);
         }
         break;
+      }
       case "PRESENCE":
         this.setState({ clients: message.clients });
         break;
-      case "QUEUE_UPDATED":
-        this.setState({ tracks: message.tracks });
+      case "QUEUE_UPDATED": {
+        let currentPosition = this.getCurrentTrackPosition();
+        let tracks = this.mergeServerTracks(message.tracks);
+        let currentTrack = tracks.find((track) => track.id === this.state.currentTrackId);
+        let currentUrlChanged =
+          currentTrack &&
+          currentTrack.id === this.loadedTrackId &&
+          currentTrack.url !== this.loadedTrackUrl;
+        this.setState({ tracks });
+        if (currentTrack && currentUrlChanged && (await this.loadTrack(currentTrack))) {
+          this.setMediaTime(currentPosition);
+        }
         break;
+      }
       case "NTP_RESPONSE": {
         let measurement = handleNtpResponse(message);
         if (!measurement) return;
@@ -247,7 +332,15 @@ export class RadioClient extends EventTarget {
           this.send({ type: "TRACK_READY", trackId: message.track.id });
         }
         break;
+      case "TRACK_BUFFERING":
+        this.setState({
+          bufferingTrackId: message.trackId,
+          readyClientCount: message.readyClientCount,
+          totalClientCount: message.totalClientCount,
+        });
+        break;
       case "SCHEDULED_PLAY":
+        this.setState({ bufferingTrackId: null });
         await this.schedulePlay(
           message.trackId,
           message.trackTimeSeconds,
@@ -271,30 +364,84 @@ export class RadioClient extends EventTarget {
     }
   }
 
-  private async loadTrack(track: Track): Promise<AudioBuffer | null> {
-    let cached = this.buffers.get(track.id);
-    if (cached) {
-      if (track.id === this.state.currentTrackId)
-        this.setState({ durationSeconds: cached.duration });
-      return cached;
-    }
-    this.setStatus(`Loading ${track.title}...`);
-    try {
-      let response = await fetch(track.url);
-      if (!response.ok) {
-        this.setStatus(`Could not load ${track.title}`);
-        return null;
-      }
-      let buffer = await this.audio.decodeAudioData(await response.arrayBuffer());
-      this.buffers.set(track.id, buffer);
+  private async loadTrack(track: Track): Promise<boolean> {
+    if (track.upload) return false;
+    if (
+      this.loadedTrackId === track.id &&
+      this.loadedTrackUrl === track.url &&
+      this.media.readyState >= 2
+    ) {
       if (track.id === this.state.currentTrackId) {
-        this.setState({ durationSeconds: buffer.duration });
+        this.setState({ durationSeconds: this.mediaDuration() });
       }
-      this.setStatus(`Loaded ${track.title}`);
-      return buffer;
-    } catch {
-      this.setStatus(`Could not load ${track.title}`);
-      return null;
+      return true;
+    }
+    if (this.loadPromise && this.loadedTrackId === track.id && this.loadedTrackUrl === track.url) {
+      return this.loadPromise;
+    }
+
+    this.loadAbort?.abort();
+    let controller = new AbortController();
+    this.loadAbort = controller;
+    this.loadedTrackId = track.id;
+    this.loadedTrackUrl = track.url;
+    this.setStatus(`Buffering ${track.title}...`);
+
+    let promise = new Promise<boolean>((resolve) => {
+      let settled = false;
+      let finish = (ready: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (ready) {
+          let durationSeconds = this.mediaDuration();
+          if (track.id === this.state.currentTrackId) this.setState({ durationSeconds });
+          this.setStatus(`Ready ${track.title}`);
+        } else {
+          if (this.loadedTrackId === track.id && this.loadedTrackUrl === track.url) {
+            this.loadedTrackId = null;
+            this.loadedTrackUrl = null;
+          }
+          this.setStatus(`Could not load ${track.title}`);
+        }
+        resolve(ready);
+        controller.abort();
+      };
+
+      this.media.addEventListener(
+        "loadedmetadata",
+        () => {
+          if (track.id === this.state.currentTrackId) {
+            this.setState({ durationSeconds: this.mediaDuration() });
+          }
+        },
+        { signal: controller.signal },
+      );
+      this.media.addEventListener("canplay", () => finish(true), {
+        once: true,
+        signal: controller.signal,
+      });
+      this.media.addEventListener("error", () => finish(false), {
+        once: true,
+        signal: controller.signal,
+      });
+      controller.signal.addEventListener(
+        "abort",
+        () => {
+          if (settled) return;
+          settled = true;
+          resolve(false);
+        },
+        { once: true },
+      );
+      this.media.src = track.url;
+      this.media.load();
+    });
+    this.loadPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (this.loadPromise === promise) this.loadPromise = null;
+      if (this.loadAbort === controller) this.loadAbort = null;
     }
   }
 
@@ -304,90 +451,145 @@ export class RadioClient extends EventTarget {
     targetServerTime: number,
   ): Promise<void> {
     let track = this.state.tracks.find((candidate) => candidate.id === trackId);
-    if (!track) return;
-    let buffer = await this.loadTrack(track);
-    if (!buffer) return;
+    if (!track || !(await this.loadTrack(track))) return;
     await this.audio.resume();
 
-    let context = this.audio.getContext();
-    let waitSeconds = calculateWaitTimeMilliseconds(targetServerTime, this.state.offsetMs) / 1000;
-    let startTime = context.currentTime + Math.max(0, waitSeconds);
-    let boundedOffset = Math.max(0, Math.min(trackTimeSeconds, buffer.duration - 0.01));
-
-    this.stopSource();
-    let source = this.audio.createBufferSource();
-    source.buffer = buffer;
-    source.connect(this.audio.getInputNode());
-    source.start(startTime, boundedOffset);
-    source.addEventListener(
-      "ended",
-      () => {
-        if (this.sourceNode === source) {
-          this.stopProgressTimer();
-          this.setState({ playing: false, positionSeconds: this.state.durationSeconds });
-        }
-      },
-      { once: true },
-    );
-
-    this.sourceNode = source;
-    this.playbackStartTime = startTime;
-    this.playbackOffset = boundedOffset;
+    let boundedOffset = this.boundTrackTime(trackTimeSeconds);
+    this.clearScheduledAction();
     this.currentTime = boundedOffset;
     this.setState({
       currentTrackId: trackId,
       playing: true,
       positionSeconds: boundedOffset,
-      durationSeconds: buffer.duration,
-      status: `Playing ${track.title}`,
+      durationSeconds: this.mediaDuration(),
+      status: `Starting ${track.title}`,
     });
-    this.startProgressTimer();
+    this.setMediaTime(boundedOffset);
+
+    this.runAtServerTime(targetServerTime, async () => {
+      if (this.loadedTrackId !== trackId || this.disposed) return;
+      this.setMediaTime(boundedOffset);
+      try {
+        await this.media.play();
+        this.setStatus(`Playing ${track.title}`);
+        this.startProgressTimer();
+      } catch {
+        this.setState({ playing: false, status: "Wake audio to play" });
+      }
+    });
   }
 
   private schedulePause(trackId: string, trackTimeSeconds: number, targetServerTime: number): void {
-    let waitSeconds = calculateWaitTimeMilliseconds(targetServerTime, this.state.offsetMs) / 1000;
-    let context = this.audio.getContext();
-    let stopTime = context.currentTime + Math.max(0, waitSeconds);
-    let source = this.sourceNode;
-    this.sourceNode = null;
-    try {
-      source?.stop(stopTime);
-      source?.disconnect();
-    } catch {
-      // Already stopped.
-    }
-    this.currentTime = this.boundTrackTime(trackTimeSeconds);
-    this.stopProgressTimer();
-    this.setState({
-      currentTrackId: trackId,
-      playing: false,
-      positionSeconds: this.currentTime,
-      status: "Paused",
+    let boundedTime = this.boundTrackTime(trackTimeSeconds);
+    this.clearScheduledAction();
+    this.runAtServerTime(targetServerTime, () => {
+      this.media.pause();
+      this.currentTime = boundedTime;
+      this.setState({ currentTrackId: trackId });
+      this.setMediaTime(boundedTime);
+      this.stopProgressTimer();
+      this.setState({
+        playing: false,
+        positionSeconds: boundedTime,
+        status: "Paused",
+      });
     });
   }
 
+  private runAtServerTime(targetServerTime: number, action: () => void): void {
+    let waitMilliseconds = calculateWaitTimeMilliseconds(targetServerTime, this.state.offsetMs);
+    if (waitMilliseconds <= 4) {
+      action();
+      return;
+    }
+    this.scheduledActionTimer = window.setTimeout(() => {
+      this.scheduledActionTimer = null;
+      action();
+    }, waitMilliseconds);
+  }
+
   private getCurrentTrackPosition(): number {
-    if (!this.state.playing || !this.sourceNode) return this.currentTime;
-    let elapsed = this.audio.getContext().currentTime - this.playbackStartTime;
-    return this.boundTrackTime(this.playbackOffset + elapsed);
+    if (
+      this.loadedTrackId === this.state.currentTrackId &&
+      Number.isFinite(this.media.currentTime)
+    ) {
+      return this.boundTrackTime(this.media.currentTime);
+    }
+    return this.currentTime;
   }
 
   private boundTrackTime(trackTimeSeconds: number): number {
-    let maxTime =
-      this.state.durationSeconds > 0 ? Math.max(0, this.state.durationSeconds - 0.01) : Infinity;
+    let duration = this.mediaDuration() || this.state.durationSeconds;
+    let maxTime = duration > 0 ? Math.max(0, duration - 0.01) : Infinity;
     return Math.max(0, Math.min(trackTimeSeconds, maxTime));
   }
 
-  private stopSource(): void {
-    let source = this.sourceNode;
-    if (!source) return;
-    this.sourceNode = null;
+  private setMediaTime(value: number): void {
+    if (this.loadedTrackId !== this.state.currentTrackId && this.state.currentTrackId !== null)
+      return;
     try {
-      source.disconnect();
-      source.stop();
+      this.media.currentTime = value;
     } catch {
-      // Already stopped.
+      // Metadata may not be available yet; the scheduled start retries this assignment.
     }
+  }
+
+  private mediaDuration(): number {
+    return Number.isFinite(this.media.duration) && this.media.duration > 0
+      ? this.media.duration
+      : 0;
+  }
+
+  private bindMediaEvents(): void {
+    let signal = this.mediaEvents.signal;
+    this.media.addEventListener(
+      "ended",
+      () => {
+        let trackId = this.state.currentTrackId;
+        if (!trackId || !this.state.playing || this.loadedTrackId !== trackId) return;
+        let position = this.mediaDuration() || this.media.currentTime;
+        this.currentTime = position;
+        this.stopProgressTimer();
+        this.setState({ playing: false, positionSeconds: position, status: "Ended" });
+        this.send({ type: "TRACK_ENDED", trackId, trackTimeSeconds: position });
+      },
+      { signal },
+    );
+    this.media.addEventListener(
+      "waiting",
+      () => {
+        if (this.state.playing) this.setStatus("Buffering...");
+      },
+      { signal },
+    );
+    this.media.addEventListener(
+      "playing",
+      () => {
+        let track = this.state.tracks.find(
+          (candidate) => candidate.id === this.state.currentTrackId,
+        );
+        if (track) this.setStatus(`Playing ${track.title}`);
+      },
+      { signal },
+    );
+    this.media.addEventListener("progress", () => this.updateBufferedSeconds(), { signal });
+    this.media.addEventListener(
+      "durationchange",
+      () => {
+        if (this.loadedTrackId === this.state.currentTrackId) {
+          this.setState({ durationSeconds: this.mediaDuration() });
+        }
+      },
+      { signal },
+    );
+  }
+
+  private updateBufferedSeconds(): void {
+    let bufferedSeconds = 0;
+    for (let index = 0; index < this.media.buffered.length; index++) {
+      bufferedSeconds = Math.max(bufferedSeconds, this.media.buffered.end(index));
+    }
+    this.setState({ bufferedSeconds });
   }
 
   private startProgressTimer(): void {
@@ -402,6 +604,59 @@ export class RadioClient extends EventTarget {
   private stopProgressTimer(): void {
     if (this.progressTimer) window.clearInterval(this.progressTimer);
     this.progressTimer = null;
+  }
+
+  private clearScheduledAction(): void {
+    if (this.scheduledActionTimer) window.clearTimeout(this.scheduledActionTimer);
+    this.scheduledActionTimer = null;
+  }
+
+  private mergeTrack(track: Track): void {
+    let exists = this.state.tracks.some((candidate) => candidate.id === track.id);
+    let tracks = exists
+      ? this.state.tracks.map((candidate) => (candidate.id === track.id ? track : candidate))
+      : [...this.state.tracks, track];
+    this.setState({ tracks });
+  }
+
+  private mergeServerTracks(serverTracks: Track[]): Track[] {
+    return serverTracks.map((track) => {
+      let localTrack = this.state.tracks.find((candidate) => candidate.id === track.id);
+      if (!track.upload || !localTrack?.upload) return track;
+      return {
+        ...track,
+        upload: {
+          ...track.upload,
+          bytesReceived: Math.max(track.upload.bytesReceived, localTrack.upload.bytesReceived),
+        },
+      };
+    });
+  }
+
+  private updateUploadProgress(trackId: string, bytesSent: number): void {
+    this.setState({
+      tracks: this.state.tracks.map((track) =>
+        track.id === trackId && track.upload
+          ? {
+              ...track,
+              upload: {
+                ...track.upload,
+                bytesReceived: Math.min(bytesSent, track.upload.sizeBytes),
+              },
+            }
+          : track,
+      ),
+    });
+  }
+
+  private markUploadFailed(trackId: string): void {
+    this.setState({
+      tracks: this.state.tracks.map((track) =>
+        track.id === trackId && track.upload
+          ? { ...track, upload: { ...track.upload, status: "failed" as const } }
+          : track,
+      ),
+    });
   }
 
   private startHeartbeat(): void {

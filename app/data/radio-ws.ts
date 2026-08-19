@@ -98,6 +98,12 @@ export function attachRadioWebSocketServer(server: http.Server): WebSocketServer
         case "REMOVE_TRACK":
           void radioSpace.removeTrack(message.trackId);
           break;
+        case "RENAME_TRACK":
+          void radioSpace.renameTrack(clientId, message.trackId, message.title);
+          break;
+        case "TRACK_ENDED":
+          void radioSpace.requestTrackEnded(clientId, message.trackId, message.trackTimeSeconds);
+          break;
         case "REORDER_TRACKS":
           void radioSpace.reorderTracks(message.trackIds);
           break;

@@ -48,6 +48,23 @@ class FakeAudioContext {
       smoothingTimeConstant: 0,
     } as unknown as AnalyserNode;
   }
+
+  createMediaElementSource(): MediaElementAudioSourceNode {
+    return { connect() {} } as unknown as MediaElementAudioSourceNode;
+  }
+}
+
+class FakeMediaElement extends EventTarget {
+  src = "";
+  preload = "";
+  currentTime = 0;
+  duration = Number.NaN;
+  readyState = 0;
+  buffered = { length: 0, end: () => 0 } as unknown as TimeRanges;
+  pause(): void {}
+  load(): void {}
+  async play(): Promise<void> {}
+  removeAttribute(): void {}
 }
 
 function snapshot(): RoomSnapshot {
@@ -76,6 +93,10 @@ it("keeps a connecting WebSocket alive across the initial component update", () 
     globalThis.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
     globalThis.document = {
       documentElement: { clientWidth: 960 },
+      createElement(name: string) {
+        if (name === "audio") return new FakeMediaElement();
+        throw new Error(`Unexpected element: ${name}`);
+      },
     } as unknown as Document;
     globalThis.localStorage = {
       getItem(key: string) {

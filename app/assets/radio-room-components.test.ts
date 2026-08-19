@@ -16,6 +16,7 @@ const track: Track = {
 
 it("keeps a drag position visible and commits a paused seek once", async () => {
   let positions: number[] = [];
+  let renames: Array<[string, string]> = [];
   let state: RadioClientState = {
     connected: true,
     synced: true,
@@ -24,6 +25,10 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
     tracks: [track],
     clients: [],
     currentTrackId: track.id,
+    bufferingTrackId: null,
+    readyClientCount: 0,
+    totalClientCount: 0,
+    bufferedSeconds: 0,
     playing: false,
     positionSeconds: 12,
     durationSeconds: 120,
@@ -34,6 +39,9 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
     seek(position: number) {
       positions.push(position);
       state.positionSeconds = position;
+    },
+    renameTrack(trackId: string, title: string) {
+      renames.push([trackId, title]);
     },
   } as RadioClient;
   let result = render(
@@ -56,6 +64,17 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
       result.$('button[aria-label="Remove Track 1"]')?.getAttribute("title"),
       "Remove Track 1",
     );
+
+    await result.act(() =>
+      result.$('button[aria-label="Rename Track 1"]')?.dispatchEvent(new MouseEvent("click")),
+    );
+    let renameInput = result.$('input[aria-label="Rename Track 1"]') as HTMLInputElement;
+    renameInput.value = "Renamed track";
+    await result.act(() => {
+      renameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      renameInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    assert.deepEqual(renames, [["track-1", "Renamed track"]]);
 
     let seek = result.$('input[aria-label="Track position"]') as HTMLInputElement;
     seek.getBoundingClientRect = () => ({ left: 0, width: 200 }) as unknown as DOMRect;

@@ -14,6 +14,12 @@ export type Track = {
   title: string;
   url: string;
   addedAt: number;
+  mediaType?: string;
+  upload?: {
+    status: "uploading" | "failed";
+    bytesReceived: number;
+    sizeBytes: number;
+  };
 };
 
 export type ClientInfo = {
@@ -79,6 +85,16 @@ export type ClientMessage =
       trackId: string;
     }
   | {
+      type: "RENAME_TRACK";
+      trackId: string;
+      title: string;
+    }
+  | {
+      type: "TRACK_ENDED";
+      trackId: string;
+      trackTimeSeconds: number;
+    }
+  | {
       type: "REORDER_TRACKS";
       trackIds: string[];
     }
@@ -110,6 +126,12 @@ export type ServerMessage =
   | {
       type: "LOAD_TRACK";
       track: Track;
+    }
+  | {
+      type: "TRACK_BUFFERING";
+      trackId: string;
+      readyClientCount: number;
+      totalClientCount: number;
     }
   | {
       type: "SCHEDULED_PLAY";
@@ -175,6 +197,20 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
     case "REMOVE_TRACK":
       if (typeof message.trackId === "string")
         return { type: message.type, trackId: message.trackId };
+      return null;
+    case "RENAME_TRACK":
+      if (typeof message.trackId === "string" && typeof message.title === "string") {
+        return { type: "RENAME_TRACK", trackId: message.trackId, title: message.title };
+      }
+      return null;
+    case "TRACK_ENDED":
+      if (typeof message.trackId === "string" && typeof message.trackTimeSeconds === "number") {
+        return {
+          type: "TRACK_ENDED",
+          trackId: message.trackId,
+          trackTimeSeconds: message.trackTimeSeconds,
+        };
+      }
       return null;
     case "PLAY":
     case "PAUSE":

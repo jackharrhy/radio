@@ -1,4 +1,4 @@
-import { get, post, route } from "remix/routes";
+import { get, post, put, route } from "remix/routes";
 
 export const routes = route({
   assets: get("/assets/*path"),
@@ -6,5 +6,8 @@ export const routes = route({
     kitchenSink: get("kitchen-sink"),
   }),
   home: "/",
-  tracks: post("/tracks"),
+  tracks: route("tracks", {
+    create: post("/"),
+    content: put(":trackId/content"),
+  }),
 });
