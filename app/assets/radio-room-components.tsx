@@ -104,7 +104,14 @@ export function RadioPlayerView(
     let displayedPosition = scrubPosition ?? state.positionSeconds;
 
     return (
-      <section data-radio-shell="" mix={[radioStyle.window, radioStyle.shell]}>
+      <section
+        data-radio-shell=""
+        mix={[
+          radioStyle.window,
+          radioStyle.shell,
+          preview ? radioStyle.previewShell : radioStyle.pageShell,
+        ]}
+      >
         <header mix={[radioStyle.titleBar, radioStyle.topBar]}>
           <StatusPill state={state} />
         </header>
@@ -340,6 +347,9 @@ export function TrackList(
 ) {
   let editingTrackId: string | null = null;
   let draftTitle = "";
+  let draggingTrackId: string | null = null;
+  let dragOrder: string[] | null = null;
+  let dropTargetId: string | null = null;
 
   function beginRename(track: Track): void {
     if (track.upload) return;
@@ -365,39 +375,105 @@ export function TrackList(
     handle.update();
   }
 
+  function getOrderedTracks(tracks: Track[]): Track[] {
+    if (!dragOrder) return tracks;
+    let byId = new Map(tracks.map((track) => [track.id, track]));
+    let ordered = dragOrder.flatMap((trackId) => {
+      let track = byId.get(trackId);
+      return track ? [track] : [];
+    });
+    let orderedIds = new Set(ordered.map((track) => track.id));
+    return [...ordered, ...tracks.filter((track) => !orderedIds.has(track.id))];
+  }
+
+  function stageDropTarget(track: Track, event: DragEvent & { currentTarget: HTMLElement }): void {
+    if (!draggingTrackId || draggingTrackId === track.id) return;
+    event.preventDefault();
+
+    let tracks = getOrderedTracks(handle.props.state.tracks);
+    let nextOrder = tracks.map((candidate) => candidate.id);
+    let sourceIndex = nextOrder.indexOf(draggingTrackId);
+    if (sourceIndex === -1) return;
+    nextOrder.splice(sourceIndex, 1);
+
+    let targetIndex = nextOrder.indexOf(track.id);
+    if (targetIndex === -1) return;
+    let bounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientY >= bounds.top + bounds.height / 2) targetIndex++;
+    nextOrder.splice(targetIndex, 0, draggingTrackId);
+
+    let orderChanged =
+      !dragOrder || nextOrder.some((trackId, index) => dragOrder?.[index] !== trackId);
+    if (!orderChanged && dropTargetId === track.id) return;
+    dragOrder = nextOrder;
+    dropTargetId = track.id;
+    handle.update();
+  }
+
+  function finishDrag(commit: boolean): void {
+    let nextOrder = dragOrder;
+    draggingTrackId = null;
+    dragOrder = null;
+    dropTargetId = null;
+    if (commit && nextOrder) handle.props.client?.reorderTracks(nextOrder);
+    handle.update();
+  }
+
+  function moveTrack(trackId: string, destination: "up" | "down" | "first" | "last"): void {
+    let nextOrder = handle.props.state.tracks.map((track) => track.id);
+    let sourceIndex = nextOrder.indexOf(trackId);
+    if (sourceIndex === -1) return;
+    let targetIndex =
+      destination === "first"
+        ? 0
+        : destination === "last"
+          ? nextOrder.length - 1
+          : sourceIndex + (destination === "up" ? -1 : 1);
+    targetIndex = Math.max(0, Math.min(nextOrder.length - 1, targetIndex));
+    if (targetIndex === sourceIndex) return;
+    nextOrder.splice(sourceIndex, 1);
+    nextOrder.splice(targetIndex, 0, trackId);
+    handle.props.client?.reorderTracks(nextOrder);
+  }
+
   return () => {
     let { state } = handle.props;
     if (state.tracks.length === 0) {
       return null;
     }
 
+    let orderedTracks = getOrderedTracks(state.tracks);
+
     return (
       <ol mix={radioStyle.queueList}>
-        {state.tracks.map((track, index) => {
+        {orderedTracks.map((track, index) => {
           let active = track.id === state.currentTrackId;
           let uploadPercent = track.upload
             ? Math.round((track.upload.bytesReceived / track.upload.sizeBytes) * 100)
             : null;
           let distribution =
             state.bufferingTrackId === track.id && state.totalClientCount > 0
-              ? `${state.readyClientCount}/${state.totalClientCount}`
-              : null;
-          let browserBuffer =
-            active &&
-            state.durationSeconds > 0 &&
-            state.bufferedSeconds > 0 &&
-            state.bufferedSeconds < state.durationSeconds * 0.98
-              ? `${Math.round((state.bufferedSeconds / state.durationSeconds) * 100)}%`
+              ? `${state.readyClientCount}/${state.totalClientCount} ready`
               : null;
           let status = track.upload
             ? track.upload.status === "failed"
               ? "failed"
               : `↑ ${uploadPercent}%`
-            : (distribution ?? (browserBuffer ? `buf ${browserBuffer}` : null));
+            : distribution;
           return (
             <li
               key={track.id}
-              mix={[radioStyle.queueItem, active ? radioStyle.activeQueueItem : null]}
+              mix={[
+                radioStyle.queueItem,
+                active ? radioStyle.activeQueueItem : null,
+                on("dragover", (event) => stageDropTarget(track, event)),
+                on("drop", (event) => {
+                  stageDropTarget(track, event);
+                  finishDrag(true);
+                }),
+              ]}
+              data-dragging={draggingTrackId === track.id ? "true" : undefined}
+              data-drop-target={dropTargetId === track.id ? "true" : undefined}
               data-upload-status={track.upload?.status}
             >
               {track.upload?.status === "uploading" ? (
@@ -407,6 +483,44 @@ export function TrackList(
                   style={{ width: `${uploadPercent}%` }}
                 />
               ) : null}
+              <button
+                aria-label={`Reorder ${track.title}`}
+                aria-keyshortcuts="ArrowUp ArrowDown Home End"
+                draggable={true}
+                mix={[
+                  radioStyle.dragHandle,
+                  on("dragstart", (event) => {
+                    draggingTrackId = track.id;
+                    dragOrder = state.tracks.map((candidate) => candidate.id);
+                    dropTargetId = track.id;
+                    if (event.dataTransfer) {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", track.id);
+                    }
+                    handle.update();
+                  }),
+                  on("dragend", () => finishDrag(false)),
+                  on("keydown", (event) => {
+                    let destination: "up" | "down" | "first" | "last" | null =
+                      event.key === "ArrowUp"
+                        ? "up"
+                        : event.key === "ArrowDown"
+                          ? "down"
+                          : event.key === "Home"
+                            ? "first"
+                            : event.key === "End"
+                              ? "last"
+                              : null;
+                    if (!destination) return;
+                    event.preventDefault();
+                    moveTrack(track.id, destination);
+                  }),
+                ]}
+                title={`Drag to reorder ${track.title}`}
+                type="button"
+              >
+                Reorder
+              </button>
               <button
                 type="button"
                 mix={[
@@ -444,28 +558,31 @@ export function TrackList(
                   value={draftTitle}
                   autofocus={true}
                 />
-              ) : (
+              ) : null}
+              <span mix={radioStyle.trackActions}>
+                {editingTrackId === track.id ? null : (
+                  <button
+                    type="button"
+                    mix={[radioStyle.trackEditButton, on("click", () => beginRename(track))]}
+                    disabled={Boolean(track.upload)}
+                    aria-label={`Rename ${track.title}`}
+                    title={`Rename ${track.title}`}
+                  >
+                    Rename
+                  </button>
+                )}
                 <button
                   type="button"
-                  mix={[radioStyle.smallEditButton, on("click", () => beginRename(track))]}
-                  disabled={Boolean(track.upload)}
-                  aria-label={`Rename ${track.title}`}
-                  title={`Rename ${track.title}`}
+                  mix={[
+                    radioStyle.trackRemoveButton,
+                    on("click", () => handle.props.client?.removeTrack(track.id)),
+                  ]}
+                  aria-label={`Remove ${track.title}`}
+                  title={`Remove ${track.title}`}
                 >
-                  Rename
+                  Remove
                 </button>
-              )}
-              <button
-                type="button"
-                mix={[
-                  radioStyle.smallDangerButton,
-                  on("click", () => handle.props.client?.removeTrack(track.id)),
-                ]}
-                aria-label={`Remove ${track.title}`}
-                title={`Remove ${track.title}`}
-              >
-                Remove
-              </button>
+              </span>
             </li>
           );
         })}

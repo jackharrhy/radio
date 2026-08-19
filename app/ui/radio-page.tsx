@@ -33,7 +33,6 @@ const pageStyle = css({
   display: "grid",
   placeItems: "center",
   "@media (max-width: 720px)": {
-    alignItems: "start",
     padding: "8px",
   },
 });

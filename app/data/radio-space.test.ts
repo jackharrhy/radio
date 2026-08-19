@@ -221,6 +221,47 @@ describe("RadioSpace queue and playback coordination", () => {
     room.disconnect("client-1", socket);
   });
 
+  it("reorders the complete queue, broadcasts it, and persists it", async () => {
+    let stateDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "radio-reorder-"));
+    let statePath = path.join(stateDirectory, "state.json");
+    let room = new RadioSpace({ statePath });
+    let socket = createSocket();
+
+    try {
+      room.connect(socket, { clientId: "client-1", name: "Ada" });
+      await room.addTrack(track("track-1"));
+      await room.addTrack(track("track-2"));
+      await room.addTrack(track("track-3"));
+      socket.sent = [];
+
+      await room.reorderTracks(["track-3", "track-1", "track-2"]);
+      assert.deepEqual(
+        room.snapshot().tracks.map((candidate) => candidate.id),
+        ["track-3", "track-1", "track-2"],
+      );
+      assert.deepEqual(
+        messagesOf(socket, "QUEUE_UPDATED")
+          .at(-1)
+          ?.tracks.map((candidate) => candidate.id),
+        ["track-3", "track-1", "track-2"],
+      );
+
+      socket.sent = [];
+      await room.reorderTracks(["track-3", "track-3", "track-2"]);
+      assert.equal(messagesOf(socket, "QUEUE_UPDATED").length, 0);
+
+      let reloaded = new RadioSpace({ statePath });
+      await reloaded.load();
+      assert.deepEqual(
+        reloaded.snapshot().tracks.map((candidate) => candidate.id),
+        ["track-3", "track-1", "track-2"],
+      );
+    } finally {
+      room.disconnect("client-1", socket);
+      await fs.rm(stateDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("renames both the queue entry and its file on disk", async () => {
     let uploadDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "radio-rename-"));
     let room = createRoom({ uploadDirectory });

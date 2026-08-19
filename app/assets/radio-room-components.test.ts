@@ -5,7 +5,7 @@ import { render } from "remix/ui/test";
 
 import type { Track } from "../data/protocol.ts";
 import type { RadioClient, RadioClientState } from "./radio-client.ts";
-import { RadioPlayerView } from "./radio-room-components.tsx";
+import { RadioPlayerView, TrackList } from "./radio-room-components.tsx";
 
 const track: Track = {
   id: "track-1",
@@ -13,6 +13,12 @@ const track: Track = {
   url: "/uploads/track-1.mp3",
   addedAt: 1,
 };
+
+const tracks: Track[] = [
+  track,
+  { id: "track-2", title: "Track 2", url: "/uploads/track-2.mp3", addedAt: 2 },
+  { id: "track-3", title: "Track 3", url: "/uploads/track-3.mp3", addedAt: 3 },
+];
 
 it("keeps a drag position visible and commits a paused seek once", async () => {
   let positions: number[] = [];
@@ -99,11 +105,121 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
   }
 });
 
+it("reorders tracks with drag and drop and with the keyboard", async () => {
+  let orders: string[][] = [];
+  let state: RadioClientState = {
+    connected: true,
+    synced: true,
+    offsetMs: 0,
+    rttMs: 1,
+    tracks,
+    clients: [],
+    currentTrackId: null,
+    bufferingTrackId: null,
+    readyClientCount: 0,
+    totalClientCount: 0,
+    bufferedSeconds: 0,
+    playing: false,
+    positionSeconds: 0,
+    durationSeconds: 0,
+    volume: 1,
+    status: "Ready",
+  };
+  let client = {
+    reorderTracks(trackIds: string[]) {
+      orders.push(trackIds);
+    },
+  } as RadioClient;
+  let result = render(jsx(TrackList, { state, client, surface: 720 }));
+
+  try {
+    let firstHandle = result.$('button[aria-label="Reorder Track 1"]')!;
+    await result.act(() => firstHandle.dispatchEvent(createDragEvent("dragstart", 0)));
+
+    let thirdItem = result.$('button[aria-label="Reorder Track 3"]')!.closest("li")!;
+    thirdItem.getBoundingClientRect = () =>
+      ({ top: 0, height: 40, bottom: 40 }) as unknown as DOMRect;
+    await result.act(() => thirdItem.dispatchEvent(createDragEvent("dragover", 30)));
+
+    thirdItem = result.$('button[aria-label="Reorder Track 3"]')!.closest("li")!;
+    thirdItem.getBoundingClientRect = () =>
+      ({ top: 0, height: 40, bottom: 40 }) as unknown as DOMRect;
+    await result.act(() => thirdItem.dispatchEvent(createDragEvent("drop", 30)));
+
+    assert.deepEqual(orders, [["track-2", "track-3", "track-1"]]);
+
+    await result.act(() =>
+      result
+        .$('button[aria-label="Reorder Track 2"]')!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })),
+    );
+    assert.deepEqual(orders.at(-1), ["track-1", "track-3", "track-2"]);
+  } finally {
+    result.cleanup();
+  }
+});
+
+it("keeps actionable queue progress and groups compact track actions", () => {
+  let uploadingTrack: Track = {
+    id: "track-upload",
+    title: "Uploading track",
+    url: "/uploads/track-upload.mp3",
+    addedAt: 4,
+    upload: { status: "uploading", bytesReceived: 31, sizeBytes: 100 },
+  };
+  let state: RadioClientState = {
+    connected: true,
+    synced: false,
+    offsetMs: 0,
+    rttMs: 1,
+    tracks: [track, uploadingTrack],
+    clients: [],
+    currentTrackId: track.id,
+    bufferingTrackId: track.id,
+    readyClientCount: 1,
+    totalClientCount: 4,
+    bufferedSeconds: 22,
+    playing: false,
+    positionSeconds: 0,
+    durationSeconds: 100,
+    volume: 1,
+    status: "Buffering clients",
+  };
+  let result = render(jsx(TrackList, { state, client: null, surface: 720 }));
+
+  try {
+    let queueText = result.$("ol")?.textContent ?? "";
+    assert.match(queueText, /1\/4 ready/);
+    assert.match(queueText, /↑ 31%/);
+    assert.doesNotMatch(queueText, /buf|22%/);
+
+    let rename = result.$('button[aria-label="Rename Track 1"]');
+    let remove = result.$('button[aria-label="Remove Track 1"]');
+    assert.equal(rename?.parentElement, remove?.parentElement);
+  } finally {
+    result.cleanup();
+  }
+});
+
 function createPointerEvent(type: string, clientX: number): Event {
   let event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperties(event, {
     clientX: { value: clientX },
     pointerId: { value: 1 },
+  });
+  return event;
+}
+
+function createDragEvent(type: string, clientY: number): Event {
+  let event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    clientY: { value: clientY },
+    dataTransfer: {
+      value: {
+        effectAllowed: "none",
+        setData() {},
+      },
+    },
   });
   return event;
 }

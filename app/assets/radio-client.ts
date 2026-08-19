@@ -202,6 +202,21 @@ export class RadioClient extends EventTarget {
     this.send({ type: "RENAME_TRACK", trackId, title: normalizedTitle });
   }
 
+  reorderTracks(trackIds: string[]): void {
+    let currentTrackIds = this.state.tracks.map((track) => track.id);
+    if (
+      trackIds.length !== currentTrackIds.length ||
+      new Set(trackIds).size !== trackIds.length ||
+      trackIds.some((trackId) => !currentTrackIds.includes(trackId))
+    ) {
+      return;
+    }
+
+    let tracksById = new Map(this.state.tracks.map((track) => [track.id, track]));
+    this.setState({ tracks: trackIds.map((trackId) => tracksById.get(trackId)!) });
+    this.send({ type: "REORDER_TRACKS", trackIds });
+  }
+
   setVolume(volume: number): void {
     this.send({ type: "SET_VOLUME", volume });
   }

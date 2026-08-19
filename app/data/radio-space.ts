@@ -250,7 +250,14 @@ export class RadioSpace {
 
   async reorderTracks(trackIds: string[]): Promise<void> {
     let byId = new Map(this.tracks.map((track) => [track.id, track]));
-    if (trackIds.length !== this.tracks.length || trackIds.some((id) => !byId.has(id))) return;
+    if (
+      trackIds.length !== this.tracks.length ||
+      new Set(trackIds).size !== trackIds.length ||
+      trackIds.some((id) => !byId.has(id))
+    ) {
+      return;
+    }
+    if (trackIds.every((id, index) => this.tracks[index]?.id === id)) return;
     this.tracks = trackIds.map((id) => byId.get(id)!);
     await this.saveState();
     this.broadcast({ type: "QUEUE_UPDATED", tracks: this.tracks });

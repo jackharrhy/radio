@@ -1,6 +1,11 @@
 import { css, type Handle, type RemixNode } from "remix/ui";
 
-import { RadioGateView, RadioPlayerView, StatusPill } from "../../assets/radio-room-components.tsx";
+import {
+  RadioGateView,
+  RadioPlayerView,
+  StatusPill,
+  TrackList,
+} from "../../assets/radio-room-components.tsx";
 import { radioStyle } from "../../assets/radio-room-styles.ts";
 import type { RadioClientState } from "../../assets/radio-client.ts";
 import type { ClientInfo, Track } from "../../data/protocol.ts";
@@ -24,6 +29,18 @@ const tracks: Track[] = [
   },
   { id: "track-4", title: "Lionmilk, Mndsgn - Forever", url: "/dev/track-4.mp3", addedAt: 4 },
 ];
+
+const uploadingTrack: Track = {
+  id: "track-upload",
+  title: "Two hour mix",
+  url: "/dev/track-upload.mp3",
+  addedAt: 5,
+  upload: {
+    status: "uploading",
+    bytesReceived: 65_011_712,
+    sizeBytes: 209_715_200,
+  },
+};
 
 const clients: ClientInfo[] = [
   client("client-1", "Jack", 1),
@@ -61,6 +78,7 @@ export function KitchenSinkPage() {
             <a href="#controls">controls</a>
             <a href="#gate">gate</a>
             <a href="#status">status</a>
+            <a href="#buffering">buffering</a>
             <a href="#player">player</a>
             <a href="/" aria-label="Open radio">
               ↗
@@ -191,6 +209,34 @@ export function KitchenSinkPage() {
             </div>
           </SinkSection>
 
+          <SinkSection id="buffering" title="buffering">
+            <div mix={sinkStyle.bufferingGrid}>
+              <QueueSpecimen
+                label="upload / 31%"
+                state={state({
+                  tracks: [...tracks, uploadingTrack],
+                  connected: true,
+                  synced: true,
+                })}
+              />
+              <QueueSpecimen
+                label="client readiness / 1 of 4"
+                state={state({
+                  tracks,
+                  clients,
+                  currentTrackId: "track-2",
+                  bufferingTrackId: "track-2",
+                  readyClientCount: 1,
+                  totalClientCount: 4,
+                  connected: true,
+                  synced: true,
+                  durationSeconds: 242,
+                  status: "Buffering clients",
+                })}
+              />
+            </div>
+          </SinkSection>
+
           <SinkSection id="player" title="player">
             <div mix={sinkStyle.playerStack}>
               <PlayerSpecimen
@@ -305,6 +351,21 @@ function PlayerSpecimen(handle: Handle<{ label: string; state: RadioClientState 
         preview={true}
         viewportWidth={960}
       />
+    </Specimen>
+  );
+}
+
+function QueueSpecimen(handle: Handle<{ label: string; state: RadioClientState }>) {
+  return () => (
+    <Specimen label={handle.props.label}>
+      <section mix={[radioStyle.panel, radioStyle.queuePanel, sinkStyle.queuePreview]}>
+        <div mix={radioStyle.sectionHeader}>
+          <h2>playlist</h2>
+        </div>
+        <div mix={radioStyle.queueScroll}>
+          <TrackList state={handle.props.state} client={null} surface={780} />
+        </div>
+      </section>
     </Specimen>
   );
 }
@@ -436,7 +497,6 @@ const sinkStyle = {
       textTransform: "uppercase",
     },
     "& > div": { minWidth: 0, padding: "12px" },
-    "& [data-radio-shell]": { minHeight: "600px" },
   }),
   tokenGrid: css({
     display: "grid",
@@ -487,5 +547,7 @@ const sinkStyle = {
     "@media (max-width: 900px)": { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" },
     "@media (max-width: 520px)": { gridTemplateColumns: "1fr" },
   }),
+  bufferingGrid: css({ display: "grid", gap: "12px" }),
+  queuePreview: css({ minHeight: 0 }),
   playerStack: css({ display: "grid", gap: "18px" }),
 } as const;

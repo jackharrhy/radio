@@ -16,8 +16,10 @@ class AudioContextManager {
       this.context = new AudioContext();
       this.masterGain = this.context.createGain();
       this.analyser = this.context.createAnalyser();
-      this.analyser.fftSize = 256;
-      this.analyser.smoothingTimeConstant = 0.82;
+      this.analyser.fftSize = 1024;
+      this.analyser.minDecibels = -90;
+      this.analyser.maxDecibels = -24;
+      this.analyser.smoothingTimeConstant = 0.78;
       this.masterGain.gain.value = 1;
       this.masterGain.connect(this.analyser);
       this.analyser.connect(this.context.destination);

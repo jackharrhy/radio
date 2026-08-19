@@ -437,7 +437,7 @@ describe("RadioClient playback UI behavior", () => {
     client.dispose();
   });
 
-  it("sends rename commands and exposes client buffering counts", async () => {
+  it("sends queue commands and exposes client buffering counts", async () => {
     let audio = new FakeAudioManager();
     let client = new RadioClient({
       initialSnapshot: snapshot(),
@@ -456,6 +456,16 @@ describe("RadioClient playback UI behavior", () => {
       type: "RENAME_TRACK",
       trackId: "track-1",
       title: "New title",
+    });
+
+    client.reorderTracks(["track-2", "track-1"]);
+    assert.deepEqual(
+      client.state.tracks.map((track) => track.id),
+      ["track-2", "track-1"],
+    );
+    assert.partialDeepEqual(socket.sent.at(-1), {
+      type: "REORDER_TRACKS",
+      trackIds: ["track-2", "track-1"],
     });
 
     socket.emit(

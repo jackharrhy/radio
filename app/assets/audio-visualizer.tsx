@@ -9,9 +9,10 @@ interface AudioVisualizerProps {
   positionSeconds: number;
 }
 
-const PREVIEW_BARS = Array.from({ length: 48 }, (_, index) => {
-  return 16 + Math.abs(Math.sin(index * 0.71) * Math.cos(index * 0.19)) * 76;
+const PREVIEW_HALF = Array.from({ length: 24 }, (_, index) => {
+  return 15 + Math.abs(Math.sin(index * 0.63 + 0.8) * Math.cos(index * 0.21)) * 74;
 });
+const PREVIEW_BARS = [...PREVIEW_HALF.toReversed(), ...PREVIEW_HALF];
 
 export function AudioVisualizer(handle: Handle<AudioVisualizerProps>) {
   return () => (
@@ -39,6 +40,7 @@ export function AudioVisualizerPreview(handle: Handle<{ hasTrack: boolean; playi
             <rect
               height={String(height)}
               key={String(index)}
+              rx="6"
               width="12"
               x={String(20 + index * 20)}
               y={String((120 - height) / 2)}
@@ -149,29 +151,46 @@ function drawBars(
   time: number,
 ): void {
   let barCount = Math.max(20, Math.min(56, Math.floor(width / 16)));
+  barCount -= barCount % 2;
   let displayedBars = previousBars.length === barCount ? previousBars : new Float32Array(barCount);
   if (displayedBars !== previousBars) setDisplayedBars(displayedBars);
 
   if (analyser && state.playing) analyser.getByteFrequencyData(frequencyData);
 
+  let spectrum =
+    analyser && state.playing
+      ? sampleMirroredSpectrum(
+          frequencyData,
+          analyser.context.sampleRate,
+          analyser.fftSize,
+          barCount,
+        )
+      : null;
   let gap = 4;
   let barWidth = Math.max(2, (width - gap * (barCount - 1)) / barCount);
-  context.fillStyle = color;
-  context.globalAlpha = state.playing ? 0.18 : 0.1;
+  let fill = context.createLinearGradient(0, 0, 0, height);
+  fill.addColorStop(0, "transparent");
+  fill.addColorStop(0.2, color);
+  fill.addColorStop(0.8, color);
+  fill.addColorStop(1, "transparent");
+  context.fillStyle = fill;
+  context.globalAlpha = state.playing ? 0.2 : 0.11;
+
+  context.fillRect(0, height / 2 - 0.5, width, 1);
 
   for (let index = 0; index < barCount; index++) {
     let target = 0;
-    if (analyser && state.playing && frequencyData.length > 0) {
-      let frequencyIndex = Math.min(
-        frequencyData.length - 1,
-        Math.floor((index / barCount) * frequencyData.length * 0.72),
-      );
-      target = frequencyData[frequencyIndex]! / 255;
+    if (spectrum) {
+      target = Math.pow(spectrum[index]!, 0.74);
     } else if (!state.client) {
+      let half = barCount / 2;
+      let mirroredIndex = index < half ? half - 1 - index : index - half;
       let phase = state.playing ? time / 420 : state.positionSeconds * 0.75;
       target =
         0.14 +
-        Math.abs(Math.sin(index * 0.71 + phase) * Math.cos(index * 0.19 - phase * 0.4)) *
+        Math.abs(
+          Math.sin(mirroredIndex * 0.71 + phase) * Math.cos(mirroredIndex * 0.19 - phase * 0.4),
+        ) *
           (state.playing ? 0.72 : 0.34);
     } else {
       target = displayedBars[index]! * 0.985;
@@ -180,8 +199,53 @@ function drawBars(
     displayedBars[index] += (target - displayedBars[index]!) * (state.playing ? 0.24 : 0.08);
     let barHeight = Math.max(2, displayedBars[index]! * height * 0.72);
     let x = index * (barWidth + gap);
-    context.fillRect(x, (height - barHeight) / 2, barWidth, barHeight);
+    context.beginPath();
+    context.roundRect(x, (height - barHeight) / 2, barWidth, barHeight, barWidth / 2);
+    context.fill();
   }
 
   context.globalAlpha = 1;
+}
+
+export function sampleMirroredSpectrum(
+  frequencyData: Uint8Array,
+  sampleRate: number,
+  fftSize: number,
+  barCount: number,
+): Float32Array {
+  let evenBarCount = Math.max(2, barCount - (barCount % 2));
+  let half = evenBarCount / 2;
+  let bands = new Float32Array(half);
+  let spectrum = new Float32Array(evenBarCount);
+  if (frequencyData.length === 0 || sampleRate <= 0 || fftSize <= 0) return spectrum;
+
+  let binWidth = sampleRate / fftSize;
+  let minimumFrequency = Math.max(55, binWidth);
+  let maximumFrequency = Math.min(16_000, sampleRate * 0.46);
+  let frequencyRange = maximumFrequency / minimumFrequency;
+
+  for (let band = 0; band < half; band++) {
+    let startFrequency = minimumFrequency * frequencyRange ** (band / half);
+    let endFrequency = minimumFrequency * frequencyRange ** ((band + 1) / half);
+    let startBin = Math.max(1, Math.floor(startFrequency / binWidth));
+    let endBin = Math.max(startBin + 1, Math.ceil(endFrequency / binWidth));
+    endBin = Math.min(frequencyData.length, endBin);
+
+    let energy = 0;
+    let samples = 0;
+    for (let bin = startBin; bin < endBin; bin++) {
+      let normalized = frequencyData[bin]! / 255;
+      energy += normalized * normalized;
+      samples++;
+    }
+    bands[band] = samples > 0 ? Math.sqrt(energy / samples) : 0;
+  }
+
+  for (let index = 0; index < half; index++) {
+    let value = bands[index]!;
+    spectrum[half - 1 - index] = value;
+    spectrum[half + index] = value;
+  }
+
+  return spectrum;
 }
