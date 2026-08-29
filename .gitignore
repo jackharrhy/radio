@@ -3,8 +3,6 @@ dist/
 .celld/
 .wrangler/
 db/*.sqlite
-tmp/
-public/uploads/
 public/fonts/*.woff2
 .upstream/
 .DS_Store

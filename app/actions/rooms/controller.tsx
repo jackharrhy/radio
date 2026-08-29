@@ -14,7 +14,7 @@ export default createController(routes.rooms, {
       let response = await context.get(RoomCells)!.fetch(roomSlug, "/snapshot");
       if (!response.ok) return new Response("Room unavailable", { status: 503 });
       let snapshot = (await response.json()) as RoomSnapshot;
-      return context.render(<RadioPage roomSlug={roomSlug} snapshot={snapshot} />);
+      return context.render(<RadioPage snapshot={snapshot} />);
     },
   },
 });
