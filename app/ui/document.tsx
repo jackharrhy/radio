@@ -1,5 +1,6 @@
 import type { Handle, RemixNode } from "remix/ui";
 import { css } from "remix/ui";
+import { browserAssets } from "../assets/build-manifest.ts";
 
 export interface DocumentProps {
   children?: RemixNode;
@@ -25,7 +26,7 @@ export function Document(handle: Handle<DocumentProps>) {
         </head>
         <body mix={css({ margin: 0 })}>
           {children}
-          <script type="module" src="/assets/entry.js"></script>
+          <script type="module" src={browserAssets.entry}></script>
         </body>
       </html>
     );

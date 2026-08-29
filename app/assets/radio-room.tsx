@@ -1,7 +1,7 @@
 import { addEventListeners, clientEntry, type Handle, type SerializableProps } from "remix/ui";
 
 import type { RoomSnapshot } from "../data/protocol.ts";
-import { RadioClient, type RadioClientState } from "./radio-client.ts";
+import { DEFAULT_SYNC_DIAGNOSTICS, RadioClient, type RadioClientState } from "./radio-client.ts";
 import { RadioGateView, RadioPlayerView } from "./radio-room-components.tsx";
 
 interface RadioRoomProps extends SerializableProps {
@@ -23,6 +23,7 @@ export const RadioRoom = clientEntry(
       synced: false,
       offsetMs: 0,
       rttMs: 0,
+      ...DEFAULT_SYNC_DIAGNOSTICS,
       tracks: initialSnapshot.tracks,
       clients: initialSnapshot.clients,
       currentTrackId: initialSnapshot.playback.trackId,
@@ -43,11 +44,13 @@ export const RadioRoom = clientEntry(
       if (!name) return;
       localStorage.setItem("radio.name", name);
       let clientId = getOrCreateClientId();
+      let deviceCompensationMs = readDeviceCompensation();
       client = new RadioClient({
         roomSlug: handle.props.roomSlug ?? initialSnapshot.roomId,
         initialSnapshot,
         clientId,
         name,
+        deviceCompensationMs,
       });
       client.onState((nextState) => {
         state = nextState;
@@ -116,7 +119,26 @@ export const RadioRoom = clientEntry(
 function getOrCreateClientId(): string {
   let existing = localStorage.getItem("radio.clientId");
   if (existing) return existing;
-  let next = crypto.randomUUID();
+  let next = createClientId();
   localStorage.setItem("radio.clientId", next);
   return next;
+}
+
+function readDeviceCompensation(): number {
+  let value = Number(localStorage.getItem("radio.deviceCompensationMs"));
+  return Number.isFinite(value) ? value : 0;
+}
+
+type ClientCrypto = {
+  getRandomValues(array: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+  randomUUID?: () => string;
+};
+
+export function createClientId(source: ClientCrypto = crypto): string {
+  if (typeof source.randomUUID === "function") return source.randomUUID();
+  let bytes = source.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  let hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 }

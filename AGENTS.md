@@ -38,6 +38,8 @@ Keep an inspection-only clone at `./.upstream/beatsync`. That directory is ignor
 - `app/router.ts` composes Remix middleware and maps the route contract.
 - `app/middleware/render.tsx` owns request-scoped server rendering.
 - `app/assets/` owns hydrated browser behavior and radio-specific client presentation.
+- Keep clock estimation, audio-timeline conversion, and playback drift correction as separate pure
+  models with synthetic skew, jitter, output-latency, and recovery tests.
 - `app/data/radio-room-cell.ts` owns per-room SQLite state, WebSockets, and coordination.
 - `app/data/radio-room-store.ts` owns the per-room SQLite schema and persistence operations.
 - `app/data/` owns the shared protocol, room identity, and timing policy.

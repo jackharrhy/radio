@@ -3,6 +3,7 @@ import { renderWith } from "remix/middleware/render";
 import { createHtmlResponse } from "remix/response/html";
 import type { RemixNode } from "remix/ui";
 import { renderToStream } from "remix/ui/server";
+import { browserAssets } from "../assets/build-manifest.ts";
 
 export function render() {
   return renderWith(
@@ -15,7 +16,7 @@ export function render() {
           // Server rendering turns client entries into browser module URLs.
           async resolveClientEntry(entryId, component) {
             if (entryId !== "radio-room") throw new Error(`Unknown client entry '${entryId}'`);
-            return { href: "/assets/radio-room.js", exportName: component.name || "RadioRoom" };
+            return { href: browserAssets.radioRoom, exportName: component.name || "RadioRoom" };
           },
         });
 

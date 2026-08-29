@@ -3,92 +3,99 @@ import { describe, it } from "remix/test";
 
 import { NTP_CONSTANTS, epochNow } from "../data/protocol.ts";
 import {
-  calculateOffsetEstimate,
+  calculateClockEstimate,
   calculateWaitTimeMilliseconds,
-  handleNtpResponse,
-  resetProbeState,
+  localTimeAtServerTime,
+  ProbePairFilter,
+  serverTimeAtLocalTime,
   type NtpMeasurement,
 } from "./radio-sync.ts";
 
-function createMeasurement(data: { roundTripDelay: number; clockOffset: number }): NtpMeasurement {
+function createMeasurement(data: {
+  roundTripDelay: number;
+  clockOffset: number;
+  localTime?: number;
+}): NtpMeasurement {
+  let localTime = data.localTime ?? 1000;
   return {
-    t0: 1000,
-    t1: 1000 + data.clockOffset + data.roundTripDelay / 2,
-    t2: 1000 + data.clockOffset + data.roundTripDelay / 2,
-    t3: 1000 + data.roundTripDelay,
+    t0: localTime - data.roundTripDelay / 2,
+    t1: localTime + data.clockOffset,
+    t2: localTime + data.clockOffset,
+    t3: localTime + data.roundTripDelay / 2,
     roundTripDelay: data.roundTripDelay,
     clockOffset: data.clockOffset,
   };
 }
 
-describe("calculateOffsetEstimate", () => {
-  it("selects the offset from the minimum-RTT measurement", () => {
-    let result = calculateOffsetEstimate([
+describe("calculateClockEstimate", () => {
+  it("uses the low-delay envelope instead of averaging Wi-Fi spikes", () => {
+    let result = calculateClockEstimate([
       createMeasurement({ roundTripDelay: 10, clockOffset: 100 }),
-      createMeasurement({ roundTripDelay: 20, clockOffset: 110 }),
+      createMeasurement({ roundTripDelay: 11, clockOffset: 102 }),
+      createMeasurement({ roundTripDelay: 12, clockOffset: 101 }),
       createMeasurement({ roundTripDelay: 200, clockOffset: 500 }),
       createMeasurement({ roundTripDelay: 300, clockOffset: 800 }),
     ]);
 
-    assert.equal(result.offset, 100);
-    assert.equal(result.roundTrip, 132.5);
+    assert.equal(result.offset, 101);
+    assert.equal(result.roundTrip, 11);
+    assert.equal(result.sampleCount, 3);
   });
 
-  it("ignores high-RTT spikes for offset selection", () => {
-    let result = calculateOffsetEstimate([
-      createMeasurement({ roundTripDelay: 18, clockOffset: 149 }),
-      createMeasurement({ roundTripDelay: 22, clockOffset: 151 }),
-      createMeasurement({ roundTripDelay: 20, clockOffset: 150 }),
-      createMeasurement({ roundTripDelay: 500, clockOffset: 350 }),
-      createMeasurement({ roundTripDelay: 800, clockOffset: -150 }),
-    ]);
+  it("estimates oscillator skew and projects the clock forward", () => {
+    let measurements = Array.from({ length: 8 }, (_, index) => {
+      let localTime = 1_000_000 + index * 10_000;
+      let clockOffset = 50 + (localTime - 1_000_000) * 40e-6;
+      return createMeasurement({ roundTripDelay: 10 + (index % 2), clockOffset, localTime });
+    });
+    let estimate = calculateClockEstimate(measurements);
 
-    assert.equal(result.offset, 149);
+    assert.ok(Math.abs(estimate.skewPpm - 40) < 0.001);
+    let futureLocalTime = 1_200_000;
+    let futureServerTime = serverTimeAtLocalTime(futureLocalTime, estimate);
+    assert.ok(Math.abs(futureServerTime - (futureLocalTime + 58)) < 0.001);
+    assert.ok(
+      Math.abs(localTimeAtServerTime(futureServerTime, estimate) - futureLocalTime) < 0.001,
+    );
   });
 
-  it("handles negative clock offsets", () => {
-    let result = calculateOffsetEstimate([
-      createMeasurement({ roundTripDelay: 12, clockOffset: -48 }),
-      createMeasurement({ roundTripDelay: 10, clockOffset: -50 }),
-      createMeasurement({ roundTripDelay: 15, clockOffset: -55 }),
-      createMeasurement({ roundTripDelay: 500, clockOffset: -200 }),
-    ]);
+  it("resists one low-latency offset outlier", () => {
+    let measurements = Array.from({ length: 9 }, (_, index) =>
+      createMeasurement({
+        roundTripDelay: 10,
+        clockOffset: index === 4 ? 400 : 25 + index * 0.02,
+        localTime: 100_000 + index * 1000,
+      }),
+    );
+    let estimate = calculateClockEstimate(measurements);
 
-    assert.equal(result.offset, -50);
-  });
-
-  it("handles a single measurement", () => {
-    let result = calculateOffsetEstimate([
-      createMeasurement({ roundTripDelay: 50, clockOffset: 200 }),
-    ]);
-
-    assert.equal(result.offset, 200);
-    assert.equal(result.roundTrip, 50);
+    assert.ok(Math.abs(estimate.skewPpm - 20) < 0.001);
+    assert.ok(Math.abs(estimate.offset - 25.16) < 0.001);
   });
 });
 
 describe("calculateWaitTimeMilliseconds", () => {
   it("returns approximately the remaining wait time when the target is in the future", () => {
-    let wait = calculateWaitTimeMilliseconds(epochNow() + 500, 0);
-    assert.ok(wait >= 450);
-    assert.ok(wait <= 500);
+    let now = epochNow();
+    let estimate = calculateClockEstimate([
+      createMeasurement({ roundTripDelay: 10, clockOffset: 100, localTime: now }),
+    ]);
+    assert.ok(Math.abs(calculateWaitTimeMilliseconds(now + 600, estimate, now) - 500) < 0.001);
   });
 
   it("returns 0 when the target time has already passed", () => {
-    assert.equal(calculateWaitTimeMilliseconds(epochNow() - 1000, 0), 0);
-  });
-
-  it("handles negative clock offset when the client is ahead of the server", () => {
-    let wait = calculateWaitTimeMilliseconds(epochNow() + 300, -200);
-    assert.ok(wait >= 450);
-    assert.ok(wait <= 500);
+    let now = epochNow();
+    let estimate = calculateClockEstimate([
+      createMeasurement({ roundTripDelay: 10, clockOffset: 0, localTime: now }),
+    ]);
+    assert.equal(calculateWaitTimeMilliseconds(now - 1000, estimate, now), 0);
   });
 });
 
 describe("coded NTP probes", () => {
   it("keeps the better probe when a pair has a pure gap", () => {
-    resetProbeState();
-    let first = handleNtpResponse({
+    let filter = new ProbePairFilter();
+    let first = filter.handle({
       type: "NTP_RESPONSE",
       t0: epochNow() - 10,
       t1: 1000,
@@ -96,7 +103,7 @@ describe("coded NTP probes", () => {
       probeGroupId: 7,
       probeGroupIndex: 0,
     });
-    let second = handleNtpResponse({
+    let second = filter.handle({
       type: "NTP_RESPONSE",
       t0: epochNow() - 5,
       t1: 1005,
@@ -110,8 +117,8 @@ describe("coded NTP probes", () => {
   });
 
   it("rejects distorted probe gaps", () => {
-    resetProbeState();
-    handleNtpResponse({
+    let filter = new ProbePairFilter();
+    filter.handle({
       type: "NTP_RESPONSE",
       t0: 1000,
       t1: 2000,
@@ -119,7 +126,7 @@ describe("coded NTP probes", () => {
       probeGroupId: 8,
       probeGroupIndex: 0,
     });
-    let measurement = handleNtpResponse({
+    let measurement = filter.handle({
       type: "NTP_RESPONSE",
       t0: 1000 + NTP_CONSTANTS.PROBE_GAP_MS,
       t1: 2000 + NTP_CONSTANTS.PROBE_GAP_MS + NTP_CONSTANTS.PROBE_GAP_TOLERANCE_MS + 1,

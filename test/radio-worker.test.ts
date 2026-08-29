@@ -132,7 +132,10 @@ describe("Worker HTTP boundary", () => {
 
     let page = await request("/rooms/http-room");
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain("radio-room");
+    let html = await page.text();
+    expect(html).toContain("radio-room");
+    expect(html).toMatch(/\/assets\/entry-[A-Z0-9]+\.js/);
+    expect(html).toMatch(/\/assets\/radio-room-[A-Z0-9]+\.js/);
   });
 
   it("streams uploads to object storage and serves byte ranges", async () => {

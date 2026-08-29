@@ -1,5 +1,6 @@
 import {
   NTP_CONSTANTS,
+  epochNow,
   parseServerMessage,
   type ClientInfo,
   type RoomSnapshot,
@@ -7,14 +8,8 @@ import {
   type Track,
 } from "../data/protocol.ts";
 import { audioContextManager } from "./audio-context.ts";
-import {
-  calculateOffsetEstimate,
-  calculateWaitTimeMilliseconds,
-  handleNtpResponse,
-  resetProbeState,
-  sendProbePair,
-  type NtpMeasurement,
-} from "./radio-sync.ts";
+import { sendProbePair } from "./radio-sync.ts";
+import { RadioSynchronizer } from "./radio-synchronizer.ts";
 import { uploadTrackContent, type UploadProgress } from "./upload-track.ts";
 import { getTrackContentUrl, getTrackCreateUrl, getWsUrl } from "./urls.ts";
 
@@ -23,6 +18,12 @@ export interface RadioClientState {
   synced: boolean;
   offsetMs: number;
   rttMs: number;
+  clockSkewPpm: number;
+  syncUncertaintyMs: number;
+  outputLatencyMs: number;
+  playbackErrorMs: number;
+  playbackRate: number;
+  deviceCompensationMs: number;
   tracks: Track[];
   clients: ClientInfo[];
   currentTrackId: string | null;
@@ -37,10 +38,31 @@ export interface RadioClientState {
   status: string;
 }
 
+export const DEFAULT_SYNC_DIAGNOSTICS = {
+  clockSkewPpm: 0,
+  syncUncertaintyMs: Infinity,
+  outputLatencyMs: 0,
+  playbackErrorMs: 0,
+  playbackRate: 1,
+  deviceCompensationMs: 0,
+} satisfies Pick<
+  RadioClientState,
+  | "clockSkewPpm"
+  | "syncUncertaintyMs"
+  | "outputLatencyMs"
+  | "playbackErrorMs"
+  | "playbackRate"
+  | "deviceCompensationMs"
+>;
+
 interface RadioAudioManager {
   resume(): Promise<void>;
   setMasterGain(value: number, rampTime?: number): void;
   connectMediaElement(element: HTMLMediaElement): void;
+  muteNow?(): void;
+  scheduleAudibleAt?(localEpochTime: number): number;
+  scheduleMuteAt?(localEpochTime: number): number;
+  outputLatencyMs?(): number;
   getAnalyser?(): AnalyserNode;
 }
 
@@ -53,7 +75,7 @@ type UploadContent = (options: {
 
 export class RadioClient extends EventTarget {
   private socket: WebSocket | null = null;
-  private measurements: NtpMeasurement[] = [];
+  private synchronizer: RadioSynchronizer;
   private heartbeatTimer: number | null = null;
   private reconnectTimer: number | null = null;
   private progressTimer: number | null = null;
@@ -82,12 +104,14 @@ export class RadioClient extends EventTarget {
       audioManager?: RadioAudioManager;
       mediaElement?: HTMLMediaElement;
       uploadContent?: UploadContent;
+      deviceCompensationMs?: number;
     },
   ) {
     super();
     this.audio = options.audioManager ?? audioContextManager;
     this.media = options.mediaElement ?? document.createElement("audio");
     this.uploadContent = options.uploadContent ?? uploadTrackContent;
+    this.synchronizer = new RadioSynchronizer(options.deviceCompensationMs);
     this.media.preload = "auto";
     this.audio.connectMediaElement(this.media);
     this.bindMediaEvents();
@@ -96,6 +120,9 @@ export class RadioClient extends EventTarget {
       synced: false,
       offsetMs: 0,
       rttMs: 0,
+      ...DEFAULT_SYNC_DIAGNOSTICS,
+      outputLatencyMs: this.audio.outputLatencyMs?.() ?? 0,
+      deviceCompensationMs: this.synchronizer.deviceCompensationMs,
       tracks: options.initialSnapshot.tracks,
       clients: options.initialSnapshot.clients,
       currentTrackId: options.initialSnapshot.playback.trackId,
@@ -229,6 +256,13 @@ export class RadioClient extends EventTarget {
     this.sendProbePair();
   }
 
+  setDeviceCompensation(compensationMs: number): void {
+    let value = this.synchronizer.setDeviceCompensation(compensationMs);
+    localStorage.setItem("radio.deviceCompensationMs", String(value));
+    this.setState({ deviceCompensationMs: value });
+    this.sendProbePair();
+  }
+
   seek(trackTimeSeconds: number): void {
     let trackId = this.state.currentTrackId;
     if (!trackId) return;
@@ -332,17 +366,14 @@ export class RadioClient extends EventTarget {
         break;
       }
       case "NTP_RESPONSE": {
-        let measurement = handleNtpResponse(message);
-        if (!measurement) return;
-        this.measurements = [
-          ...this.measurements.slice(-NTP_CONSTANTS.MAX_MEASUREMENTS + 1),
-          measurement,
-        ];
-        let estimate = calculateOffsetEstimate(this.measurements);
+        let estimate = this.synchronizer.handleProbe(message);
+        if (!estimate) return;
         this.setState({
-          synced: this.measurements.length >= NTP_CONSTANTS.MAX_MEASUREMENTS,
+          synced: this.synchronizer.synchronized,
           offsetMs: estimate.offset,
           rttMs: estimate.roundTrip,
+          clockSkewPpm: estimate.skewPpm,
+          syncUncertaintyMs: estimate.uncertaintyMs,
         });
         break;
       }
@@ -474,6 +505,8 @@ export class RadioClient extends EventTarget {
     await this.audio.resume();
 
     let boundedOffset = this.boundTrackTime(trackTimeSeconds);
+    let localTargetTime = this.synchronizer.localExecutionTime(targetServerTime);
+    let waitSeconds = Math.max(0, localTargetTime - epochNow()) / 1000;
     this.clearScheduledAction();
     this.currentTime = boundedOffset;
     this.setState({
@@ -483,26 +516,32 @@ export class RadioClient extends EventTarget {
       durationSeconds: this.mediaDuration(),
       status: `Starting ${track.title}`,
     });
-    this.setMediaTime(boundedOffset);
+    this.synchronizer.startPlayback(trackId, boundedOffset, targetServerTime);
+    this.audio.muteNow?.();
+    this.audio.scheduleAudibleAt?.(localTargetTime);
 
-    this.runAtServerTime(targetServerTime, async () => {
+    if (boundedOffset >= waitSeconds && waitSeconds > 0) {
+      this.setMediaTime(boundedOffset - waitSeconds);
+      await this.startMedia(track);
+      return;
+    }
+    this.setMediaTime(boundedOffset);
+    this.runAtLocalTime(localTargetTime, async () => {
       if (this.loadedTrackId !== trackId || this.disposed) return;
       this.setMediaTime(boundedOffset);
-      try {
-        await this.media.play();
-        this.setStatus(`Playing ${track.title}`);
-        this.startProgressTimer();
-      } catch {
-        this.setState({ playing: false, status: "Wake audio to play" });
-      }
+      await this.startMedia(track);
     });
   }
 
   private schedulePause(trackId: string, trackTimeSeconds: number, targetServerTime: number): void {
     let boundedTime = this.boundTrackTime(trackTimeSeconds);
+    let localTargetTime = this.synchronizer.localExecutionTime(targetServerTime);
     this.clearScheduledAction();
-    this.runAtServerTime(targetServerTime, () => {
+    this.audio.scheduleMuteAt?.(localTargetTime);
+    this.runAtLocalTime(localTargetTime, () => {
       this.media.pause();
+      this.media.playbackRate = 1;
+      this.synchronizer.stopPlayback();
       this.currentTime = boundedTime;
       this.setState({ currentTrackId: trackId });
       this.setMediaTime(boundedTime);
@@ -515,8 +554,8 @@ export class RadioClient extends EventTarget {
     });
   }
 
-  private runAtServerTime(targetServerTime: number, action: () => void): void {
-    let waitMilliseconds = calculateWaitTimeMilliseconds(targetServerTime, this.state.offsetMs);
+  private runAtLocalTime(targetLocalTime: number, action: () => void): void {
+    let waitMilliseconds = Math.max(0, targetLocalTime - epochNow());
     if (waitMilliseconds <= 4) {
       action();
       return;
@@ -525,6 +564,16 @@ export class RadioClient extends EventTarget {
       this.scheduledActionTimer = null;
       action();
     }, waitMilliseconds);
+  }
+
+  private async startMedia(track: Track): Promise<void> {
+    try {
+      await this.media.play();
+      this.setStatus(`Playing ${track.title}`);
+      this.startProgressTimer();
+    } catch {
+      this.setState({ playing: false, status: "Wake audio to play" });
+    }
   }
 
   private getCurrentTrackPosition(): number {
@@ -617,7 +666,24 @@ export class RadioClient extends EventTarget {
       let positionSeconds = this.getCurrentTrackPosition();
       this.currentTime = positionSeconds;
       this.setState({ positionSeconds });
+      this.correctPlaybackDrift(positionSeconds);
     }, 250);
+  }
+
+  private correctPlaybackDrift(actualPosition: number): void {
+    let trackId = this.state.currentTrackId;
+    if (!trackId || !this.state.playing) return;
+    let correction = this.synchronizer.playbackCorrection(trackId, actualPosition, (position) =>
+      this.boundTrackTime(position),
+    );
+    if (!correction) return;
+    if (correction.hardSeekTo !== null) this.setMediaTime(correction.hardSeekTo);
+    this.media.playbackRate = correction.playbackRate;
+    this.setState({
+      playbackErrorMs: correction.errorSeconds * 1000,
+      playbackRate: correction.playbackRate,
+      outputLatencyMs: this.audio.outputLatencyMs?.() ?? 0,
+    });
   }
 
   private stopProgressTimer(): void {
@@ -679,15 +745,13 @@ export class RadioClient extends EventTarget {
   }
 
   private startHeartbeat(): void {
-    resetProbeState();
-    this.measurements = [];
+    this.synchronizer.resetClock();
     this.stopHeartbeat();
     let tick = () => {
       this.sendProbePair();
-      let interval =
-        this.measurements.length < NTP_CONSTANTS.MAX_MEASUREMENTS
-          ? NTP_CONSTANTS.INITIAL_INTERVAL_MS
-          : NTP_CONSTANTS.STEADY_STATE_INTERVAL_MS;
+      let interval = !this.synchronizer.synchronized
+        ? NTP_CONSTANTS.INITIAL_INTERVAL_MS
+        : NTP_CONSTANTS.STEADY_STATE_INTERVAL_MS;
       this.heartbeatTimer = window.setTimeout(tick, interval);
     };
     tick();
@@ -702,7 +766,7 @@ export class RadioClient extends EventTarget {
     sendProbePair({
       send: (value) => this.send(value),
       currentRTT: this.state.rttMs || undefined,
-      compensationMs: 0,
+      compensationMs: this.synchronizer.deviceCompensationMs,
       nudgeMs: 0,
     });
   }

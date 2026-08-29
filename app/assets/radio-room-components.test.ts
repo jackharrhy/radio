@@ -4,7 +4,11 @@ import { jsx } from "remix/ui/jsx-runtime";
 import { render } from "remix/ui/test";
 
 import type { Track } from "../data/protocol.ts";
-import type { RadioClient, RadioClientState } from "./radio-client.ts";
+import {
+  DEFAULT_SYNC_DIAGNOSTICS,
+  type RadioClient,
+  type RadioClientState,
+} from "./radio-client.ts";
 import { RadioPlayerView, TrackList } from "./radio-room-components.tsx";
 
 const track: Track = {
@@ -28,6 +32,7 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
     synced: true,
     offsetMs: 0,
     rttMs: 1,
+    ...DEFAULT_SYNC_DIAGNOSTICS,
     tracks: [track],
     clients: [],
     currentTrackId: track.id,
@@ -112,6 +117,7 @@ it("reorders tracks with drag and drop and with the keyboard", async () => {
     synced: true,
     offsetMs: 0,
     rttMs: 1,
+    ...DEFAULT_SYNC_DIAGNOSTICS,
     tracks,
     clients: [],
     currentTrackId: null,
@@ -172,6 +178,7 @@ it("keeps actionable queue progress and groups compact track actions", () => {
     synced: false,
     offsetMs: 0,
     rttMs: 1,
+    ...DEFAULT_SYNC_DIAGNOSTICS,
     tracks: [track, uploadingTrack],
     clients: [],
     currentTrackId: track.id,

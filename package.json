@@ -14,7 +14,7 @@
     "postinstall": "node scripts/sync-icon-font.mjs",
     "deploy:celld": "npm run build && celld deploy .",
     "start": "celld",
-    "test": "npm run test:remix && npm run test:worker",
+    "test": "npm run build && npm run test:remix && npm run test:worker",
     "test:remix": "NODE_ENV=test remix test \"app/**/*.test.{ts,tsx}\" --type server --type browser",
     "test:worker": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit",

@@ -51,6 +51,26 @@ Then start one or more Celld nodes against that bucket. Public TLS and authentic
 responsibility of Traefik. Only Celld's public Worker listener may be exposed; its internal peer
 and operator listener must remain on a trusted private network.
 
+Pushes to `main` publish `ghcr.io/jackharrhy/radio:main`, which is a pinned Celld runtime image;
+the image no longer contains the Radio application. Publishing the image and deploying the
+application are deliberately separate operations. Before rolling the image into production:
+
+1. Provision an S3-compatible fleet bucket and credentials, then deploy Radio to it with
+   `npm run deploy:celld -- --bucket "$CELLD_BUCKET"`.
+2. Configure every node with the same `CELLD_BUCKET`, `S3_ENDPOINT`, `AWS_REGION`, and AWS
+   credentials. Persist `/app/.celld`, Celld's local SQLite and replication working directory.
+3. For a multi-node fleet, override the image's loopback-only `CELLD_INTERNAL_ADDR`, set a unique
+   peer-reachable `CELLD_ADVERTISE` value on each node, and keep that listener private. The
+   loopback default intentionally supports only one node.
+4. Point Traefik at port `44100`, preserve the host-wide BasicAuth policy, and replace both
+   forwarded host/protocol headers before enabling `CELLD_TRUST_FORWARDED_HEADERS=1`.
+5. Confirm the root health check and a WebSocket room join before removing the old container.
+
+The former `/app/public/uploads` and `/app/tmp` volumes are not read by Celld. Existing audio must
+be imported into the `TRACKS` object bucket and queues recreated (or migrated with a purpose-built
+one-off tool) before those volumes are retired. Running nodes poll the fleet deployment pointer,
+so later `celld deploy` releases are adopted without rebuilding or restarting the node image.
+
 The application still has no accounts or room-level authorization. Treat every room and mutation
 as private behind the existing host-wide BasicAuth boundary.
 
@@ -63,6 +83,18 @@ as private behind the existing host-wide BasicAuth boundary.
 - `app/assets/` owns hydrated playback, clock synchronization, and browser audio.
 - `test/` owns Worker, Durable Object, R2, alarm, and WebSocket integration tests.
 - `dist/client/` is generated and must not be committed.
+
+## Playback synchronization
+
+Clients exchange paired four-timestamp probes with their room cell. The browser keeps a bounded
+low-delay sample history, rejects network-delay outliers, and fits a robust offset-and-clock-skew
+model. Shared server timestamps are converted to the Web Audio timeline with
+`AudioContext.getOutputTimestamp()` when available, with an output-latency fallback otherwise.
+
+The media element streams the track through separate volume and audible-gate gain stages. During
+playback, a bounded ±800 ppm rate servo corrects small clock drift; errors of 750 ms or more are
+re-anchored by seeking. The `−10ms` and `+10ms` controls persist a per-browser output-device
+calibration for latency that the browser cannot measure, such as downstream Bluetooth buffering.
 
 ## Inspiration
 

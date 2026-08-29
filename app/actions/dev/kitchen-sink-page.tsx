@@ -7,7 +7,7 @@ import {
   TrackList,
 } from "../../assets/radio-room-components.tsx";
 import { radioStyle } from "../../assets/radio-room-styles.ts";
-import type { RadioClientState } from "../../assets/radio-client.ts";
+import { DEFAULT_SYNC_DIAGNOSTICS, type RadioClientState } from "../../assets/radio-client.ts";
 import type { ClientInfo, Track } from "../../data/protocol.ts";
 import { desktopControlStyle, desktopIconStyle, desktopStyle } from "../../ui/desktop/styles.ts";
 import { desktopColor, desktopThemeStyle } from "../../ui/desktop/theme.ts";
@@ -376,6 +376,7 @@ function state(overrides: Partial<RadioClientState> = {}): RadioClientState {
     synced: false,
     offsetMs: 0,
     rttMs: 0,
+    ...DEFAULT_SYNC_DIAGNOSTICS,
     tracks: [],
     clients: [],
     currentTrackId: null,
