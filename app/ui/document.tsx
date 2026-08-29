@@ -24,7 +24,13 @@ export function Document(handle: Handle<DocumentProps>) {
           <title>{title}</title>
           {head}
         </head>
-        <body mix={css({ margin: 0 })}>
+        <body
+          mix={css({
+            margin: 0,
+            boxSizing: "border-box",
+            "& *, & *::before, & *::after": { boxSizing: "border-box" },
+          })}
+        >
           {children}
           <script type="module" src={browserAssets.entry}></script>
         </body>

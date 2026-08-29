@@ -22,12 +22,12 @@ export default createController(routes.rooms, {
         let name = String(form.get("name") ?? "").trim();
         let slug = normalizeRoomSlug(String(form.get("slug") ?? ""));
         if (!slug || !name || name.length > 48) {
-          context.get(Session)!.flash("message", "Use a station name and a lowercase address.");
+          context.get(Session)!.flash("message", "Use a room name and a lowercase address.");
           return redirect(routes.home.href(), 303);
         }
         let result = await context.get(RadioRuntime)!.createRoom({ slug, name });
         if (result === "exists") {
-          context.get(Session)!.flash("message", "That station address is already taken.");
+          context.get(Session)!.flash("message", "That room address is already taken.");
           return redirect(routes.home.href(), 303);
         }
         return redirect(routes.rooms.show.href({ roomSlug: slug }), 303);

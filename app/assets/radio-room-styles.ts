@@ -45,7 +45,7 @@ export const radioStyle = {
   pageShell: css({ height: "90vh" }),
   previewShell: css({ height: "600px" }),
   topBar: css({ justifyContent: "flex-end" }),
-  stationLink: css({ color: "#fff", marginRight: "auto" }),
+  roomLink: css({ color: "#fff", marginRight: "auto" }),
   statusPill: css({
     width: "12px",
     flex: "0 0 12px",
@@ -148,6 +148,23 @@ export const radioStyle = {
     },
     '&[aria-label="Wake audio"]::after': { content: '"power_settings_new"' },
     '&[aria-label="Sync playback"]::after': { content: '"sync"' },
+  }),
+  nudgeButton: css({
+    ...desktopSmallControlStyle,
+    width: "42px",
+    height: "22px",
+    padding: 0,
+    borderColor: "#9aa5aa",
+    background: "linear-gradient(#f6f9f9, #e5ebed)",
+    boxShadow: "none",
+    color: "#4f5b60",
+    fontSize: "10px",
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+    "&:hover": {
+      borderColor: desktopColor.line,
+      color: desktopColor.ink,
+    },
   }),
   playToggle: css({
     ...desktopControlStyle.button,
@@ -438,16 +455,25 @@ export const radioStyle = {
     "@media (max-width: 560px)": { gridTemplateColumns: "1fr" },
   }),
   transport: css({
-    display: "grid",
-    gridTemplateColumns: "34px 34px 34px minmax(0, 1fr)",
+    display: "flex",
     gap: "5px",
     alignItems: "center",
-    "@media (max-width: 560px)": {
-      gridTemplateColumns: "34px 34px 34px",
-      "& div": { gridColumn: "1 / -1" },
-    },
   }),
-  transportReadout: css({
-    minWidth: 0,
+  nudgeControls: css({
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    marginLeft: "auto",
+  }),
+  nudgeOffset: css({
+    width: "48px",
+    textAlign: "center",
+    color: "#526066",
+    fontSize: "11px",
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+    '&[data-zero="true"]': {
+      visibility: "hidden",
+    },
   }),
 } as const;

@@ -19,39 +19,28 @@ export function LobbyPage(
   return () => {
     let { rooms, identity, selectedRoom, message } = handle.props;
     return (
-      <Document title="Radio stations">
+      <Document title="Radio rooms">
         <main mix={[desktopThemeStyle, lobbyStyle.page]}>
           <section mix={[desktopStyle.window, lobbyStyle.window]}>
-            <header mix={[desktopStyle.titleBar, lobbyStyle.titleBar]}>
-              <span>radio</span>
-              <span>{identity ? `signed in as ${identity.name}` : "tune in together"}</span>
-            </header>
+            <div mix={desktopStyle.titleBar} aria-hidden="true"></div>
 
             <div mix={lobbyStyle.body}>
-              <div>
-                <p mix={lobbyStyle.eyebrow}>station directory</p>
-                <h1 mix={lobbyStyle.heading}>Choose a room.</h1>
-                <p mix={lobbyStyle.intro}>
-                  Every station has its own queue and playback. Pick one, give us a name, and your
-                  devices will meet there.
-                </p>
-              </div>
-
               {message ? (
                 <p role="alert" mix={lobbyStyle.message}>
                   {message}
                 </p>
               ) : null}
 
-              <form method="post" action={routes.join.href()} mix={lobbyStyle.form}>
+              <form
+                method="post"
+                action={routes.join.href()}
+                data-authenticated={identity ? "true" : "false"}
+                mix={lobbyStyle.form}
+              >
                 <fieldset mix={lobbyStyle.rooms}>
-                  <legend mix={lobbyStyle.legend}>available stations</legend>
+                  <legend mix={lobbyStyle.legend}>available rooms</legend>
                   {rooms.map((room) => (
-                    <label
-                      key={room.slug}
-                      aria-label={`Join ${room.name}`}
-                      mix={lobbyStyle.station}
-                    >
+                    <label key={room.slug} aria-label={`Join ${room.name}`} mix={lobbyStyle.room}>
                       <input
                         type="radio"
                         name="roomSlug"
@@ -81,7 +70,7 @@ export function LobbyPage(
                 </label>
                 {!identity ? (
                   <label mix={lobbyStyle.field}>
-                    <span>radio password</span>
+                    <span>password</span>
                     <input
                       mix={desktopStyle.input}
                       name="password"
@@ -92,22 +81,22 @@ export function LobbyPage(
                     />
                   </label>
                 ) : null}
-                <button mix={desktopStyle.primaryButton} type="submit">
-                  enter station
+                <button mix={[desktopStyle.primaryButton, lobbyStyle.joinButton]} type="submit">
+                  tune in
                 </button>
               </form>
 
               {identity ? (
                 <section mix={[desktopStyle.panel, lobbyStyle.createPanel]}>
-                  <h2>make a station</h2>
-                  <p>New stations stay in the directory and start with their own empty queue.</p>
+                  <h2>start a room</h2>
+                  <p>A new room starts with its own empty queue.</p>
                   <form
                     method="post"
                     action={routes.rooms.create.href()}
                     mix={lobbyStyle.createForm}
                   >
                     <label mix={lobbyStyle.field}>
-                      <span>station name</span>
+                      <span>room name</span>
                       <input mix={desktopStyle.input} name="name" maxlength={48} required={true} />
                     </label>
                     <label mix={lobbyStyle.field}>
@@ -122,14 +111,14 @@ export function LobbyPage(
                       />
                     </label>
                     <button mix={desktopStyle.primaryButton} type="submit">
-                      create station
+                      create room
                     </button>
                   </form>
                 </section>
               ) : null}
 
               {identity ? (
-                <form method="post" action={routes.logout.href()}>
+                <form method="post" action={routes.logout.href()} mix={lobbyStyle.signOutForm}>
                   <button mix={desktopStyle.smallButton} type="submit">
                     sign out
                   </button>
@@ -145,29 +134,15 @@ export function LobbyPage(
 
 const lobbyStyle = {
   page: css({
-    minHeight: "100vh",
+    minHeight: "100dvh",
     boxSizing: "border-box",
     padding: "clamp(12px, 4vw, 52px)",
     display: "grid",
     placeItems: "center",
     background: `radial-gradient(circle at 50% 12%, ${desktopColor.accentSoft}, transparent 28rem), #d6d6d6`,
   }),
-  window: css({ width: "min(720px, 100%)" }),
-  titleBar: css({ justifyContent: "space-between", gap: "16px" }),
-  body: css({ display: "grid", gap: "20px", padding: "clamp(18px, 5vw, 42px)" }),
-  eyebrow: css({
-    margin: 0,
-    fontSize: "12px",
-    letterSpacing: "0.16em",
-    textTransform: "uppercase",
-  }),
-  heading: css({
-    margin: "4px 0 8px",
-    fontSize: "clamp(32px, 7vw, 58px)",
-    lineHeight: 0.95,
-    letterSpacing: "-0.05em",
-  }),
-  intro: css({ maxWidth: "54ch", margin: 0, color: "#445159" }),
+  window: css({ width: "min(760px, 100%)" }),
+  body: css({ display: "grid", gap: "14px", padding: "clamp(20px, 4vw, 32px)" }),
   message: css({
     margin: 0,
     padding: "10px",
@@ -176,11 +151,19 @@ const lobbyStyle = {
   }),
   form: css({
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "14px",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto",
+    gap: "12px",
+    padding: "14px",
+    background: desktopColor.paper,
+    border: `1px solid ${desktopColor.line}`,
+    boxShadow: "0 0 0 1px #fff inset",
     "& > fieldset": { gridColumn: "1 / -1" },
-    "& > button": { alignSelf: "end" },
-    "@media (max-width: 560px)": { gridTemplateColumns: "1fr" },
+    '&[data-authenticated="true"]': { gridTemplateColumns: "minmax(0, 1fr) auto" },
+    "@media (max-width: 620px)": {
+      gridTemplateColumns: "1fr",
+      '&[data-authenticated="true"]': { gridTemplateColumns: "1fr" },
+      "& > button": { width: "100%" },
+    },
   }),
   rooms: css({
     border: 0,
@@ -196,23 +179,43 @@ const lobbyStyle = {
     textTransform: "uppercase",
     letterSpacing: "0.1em",
   }),
-  station: css({
+  room: css({
     display: "flex",
+    alignItems: "center",
     gap: "9px",
     padding: "11px",
     cursor: "pointer",
     background: desktopColor.paper,
     border: `1px solid ${desktopColor.line}`,
-    "&:has(input:checked)": { background: desktopColor.accentSoft, borderColor: desktopColor.ink },
+    transition: "background 120ms ease, box-shadow 120ms ease",
+    "&:hover": { background: desktopColor.wash },
+    "&:focus-within": { outline: `2px solid ${desktopColor.accent}`, outlineOffset: "2px" },
+    "&:has(input:checked)": {
+      background: desktopColor.accentSoft,
+      borderColor: desktopColor.ink,
+      boxShadow: `3px 0 0 ${desktopColor.accent} inset`,
+    },
+    "@media (prefers-reduced-motion: reduce)": { transition: "none" },
+    "& input": { accentColor: desktopColor.accent },
     "& span": { display: "grid" },
     "& small": { color: "#59666d" },
   }),
   field: css({
+    minWidth: 0,
     display: "grid",
     gap: "4px",
     "& > span": { fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.08em" },
   }),
-  createPanel: css({ padding: "16px", "& h2": { margin: 0 }, "& p": { margin: "4px 0 14px" } }),
+  joinButton: css({
+    minWidth: "112px",
+    alignSelf: "end",
+    "&:active": { transform: "translateY(1px)" },
+  }),
+  createPanel: css({
+    padding: "16px",
+    "& h2": { margin: 0, fontSize: "18px", lineHeight: 1.1 },
+    "& p": { margin: "5px 0 14px", color: "#445159" },
+  }),
   createForm: css({
     display: "grid",
     gridTemplateColumns: "1fr 1fr auto",
@@ -220,4 +223,5 @@ const lobbyStyle = {
     gap: "10px",
     "@media (max-width: 620px)": { gridTemplateColumns: "1fr" },
   }),
+  signOutForm: css({ justifySelf: "end" }),
 };

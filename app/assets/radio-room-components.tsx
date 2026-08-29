@@ -63,6 +63,7 @@ export function RadioPlayerView(
     let surface = getTextSurfaces(viewportWidth);
     let currentTrackTitle = normalizeText(currentTrack?.title ?? "");
     let displayedPosition = scrubPosition ?? state.positionSeconds;
+    let playbackOffsetMs = -state.deviceCompensationMs;
 
     return (
       <section
@@ -74,8 +75,8 @@ export function RadioPlayerView(
         ]}
       >
         <header mix={[radioStyle.titleBar, radioStyle.topBar]}>
-          <a href="/" mix={radioStyle.stationLink}>
-            stations
+          <a href="/" mix={radioStyle.roomLink}>
+            rooms
           </a>
           <StatusPill state={state} />
         </header>
@@ -184,31 +185,43 @@ export function RadioPlayerView(
             >
               Sync
             </button>
-            <button
-              mix={[
-                radioStyle.iconButton,
-                on("click", () => client?.setDeviceCompensation(state.deviceCompensationMs + 10)),
-              ]}
-              type="button"
-              aria-label="Play 10 milliseconds earlier"
-              title="Play 10 milliseconds earlier"
-            >
-              −10ms
-            </button>
-            <button
-              mix={[
-                radioStyle.iconButton,
-                on("click", () => client?.setDeviceCompensation(state.deviceCompensationMs - 10)),
-              ]}
-              type="button"
-              aria-label="Play 10 milliseconds later"
-              title="Play 10 milliseconds later"
-            >
-              +10ms
-            </button>
-            <div mix={radioStyle.transportReadout}>
-              <span>{state.playing ? "playing" : "paused"}</span>
-              <span>{state.deviceCompensationMs}ms calibration</span>
+            <div mix={radioStyle.nudgeControls}>
+              <button
+                mix={[
+                  radioStyle.nudgeButton,
+                  on("click", () => client?.setDeviceCompensation(state.deviceCompensationMs + 10)),
+                ]}
+                type="button"
+                aria-label="Play 10 milliseconds earlier"
+                title="Play 10 milliseconds earlier"
+              >
+                −10ms
+              </button>
+              <output
+                aria-hidden={playbackOffsetMs === 0}
+                aria-label={
+                  playbackOffsetMs === 0
+                    ? undefined
+                    : `Playback offset: ${Math.abs(playbackOffsetMs)} milliseconds ${playbackOffsetMs < 0 ? "earlier" : "later"}`
+                }
+                aria-live="polite"
+                data-zero={playbackOffsetMs === 0 ? "true" : "false"}
+                mix={radioStyle.nudgeOffset}
+              >
+                {playbackOffsetMs === 0 ? "0ms" : playbackOffsetMs < 0 ? "−" : "+"}
+                {playbackOffsetMs === 0 ? null : `${Math.abs(playbackOffsetMs)}ms`}
+              </output>
+              <button
+                mix={[
+                  radioStyle.nudgeButton,
+                  on("click", () => client?.setDeviceCompensation(state.deviceCompensationMs - 10)),
+                ]}
+                type="button"
+                aria-label="Play 10 milliseconds later"
+                title="Play 10 milliseconds later"
+              >
+                +10ms
+              </button>
             </div>
           </div>
           <label mix={radioStyle.seek}>

@@ -71,6 +71,11 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
       result.$('button[aria-label="Sync playback"]')?.getAttribute("title"),
       "Sync playback",
     );
+    let neutralOffset = result.$('output[data-zero="true"]');
+    assert.equal(neutralOffset?.textContent, "0ms");
+    assert.equal(neutralOffset?.getAttribute("aria-hidden"), "true");
+    assert.equal(neutralOffset?.getAttribute("aria-label"), null);
+    assert.doesNotMatch(result.container.textContent ?? "", /paused|0ms calibration/);
     assert.equal(
       result.$('button[aria-label="Remove Track 1"]')?.getAttribute("title"),
       "Remove Track 1",
@@ -105,6 +110,46 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
     await result.act(() => seek.dispatchEvent(new Event("change", { bubbles: true })));
 
     assert.deepEqual(positions, [90]);
+  } finally {
+    result.cleanup();
+  }
+});
+
+it("shows a local playback offset only when it is non-zero", () => {
+  let state: RadioClientState = {
+    connected: true,
+    synced: true,
+    offsetMs: 0,
+    rttMs: 1,
+    ...DEFAULT_SYNC_DIAGNOSTICS,
+    deviceCompensationMs: 20,
+    tracks: [],
+    clients: [],
+    currentTrackId: null,
+    bufferingTrackId: null,
+    readyClientCount: 0,
+    totalClientCount: 0,
+    bufferedSeconds: 0,
+    playing: false,
+    positionSeconds: 0,
+    durationSeconds: 0,
+    volume: 1,
+    status: "Paused",
+  };
+  let result = render(
+    jsx(RadioPlayerView, {
+      state,
+      client: null,
+      preview: true,
+      viewportWidth: 960,
+    }),
+  );
+
+  try {
+    let offset = result.$('output[aria-label^="Playback offset"]');
+    assert.equal(offset?.textContent, "−20ms");
+    assert.equal(offset?.getAttribute("aria-label"), "Playback offset: 20 milliseconds earlier");
+    assert.doesNotMatch(result.container.textContent ?? "", /paused|calibration/);
   } finally {
     result.cleanup();
   }

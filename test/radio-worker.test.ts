@@ -203,7 +203,7 @@ describe("Worker HTTP boundary", () => {
   it("renders room-specific Remix pages", async () => {
     let root = await request("/", { redirect: "manual" });
     expect(root.status).toBe(200);
-    expect(await root.text()).toContain("Choose a room.");
+    expect(await root.text()).toContain("available rooms");
 
     await ensureRoom("http-room", "HTTP room");
     let page = await authorizedRequest("/rooms/http-room");

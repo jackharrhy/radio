@@ -34,7 +34,7 @@ export default createController(routes, {
       let runtime = context.get(RadioRuntime)!;
       let currentIdentity = context.get(RadioAccess) ?? null;
       if (!name || name.length > 40 || !roomSlug || !(await runtime.getRoom(roomSlug))) {
-        return lobbyError(context.get(Session)!, "Choose a station and enter a name.", roomSlug);
+        return lobbyError(context.get(Session)!, "Choose a room and enter a name.", roomSlug);
       }
       if (
         !currentIdentity &&
@@ -43,7 +43,7 @@ export default createController(routes, {
           context.get(AccessConfig)!.password,
         ))
       ) {
-        return lobbyError(context.get(Session)!, "That radio password did not work.", roomSlug);
+        return lobbyError(context.get(Session)!, "That password does not match.", roomSlug);
       }
       let session = context.get(Session)!;
       if (!currentIdentity) session.regenerateId();

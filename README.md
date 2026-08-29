@@ -20,8 +20,8 @@ run on the real Celld runtime, which serves <http://127.0.0.1:9876> and stores i
 `.celld/dev/`. For this run, expose the same values as `CELLD_VAR_RADIO_PASSWORD` and
 `CELLD_VAR_RADIO_SESSION_SECRET`. Celld 0.4.0 currently detects a spurious source change after startup in this repo;
 the application works, but its development watcher may repeatedly rebuild. The root redirects to
-the public station lobby. `cozy` is seeded automatically, and authenticated listeners can create
-additional persistent stations there.
+the public room lobby. `cozy` is seeded automatically, and authenticated listeners can create
+additional persistent rooms there.
 
 Client assets are prebuilt into ignored `dist/client/` files because a Worker has no source
 filesystem from which `remix/assets` can compile modules on demand.
@@ -81,14 +81,14 @@ production deployment uses private, persistent MinIO storage and runs `celld dia
 deploying.
 
 The application still has no individual accounts or room-level authorization. Every holder of the
-shared password can see, create, and mutate every station.
+shared password can see, create, and mutate every room.
 
 ## Room and storage ownership
 
 - `worker.ts` owns only Worker startup and public request dispatch.
 - `app/data/worker-radio-runtime.ts` owns Durable Object and object-storage adapters, uploads, and
   ranged media responses.
-- `app/data/room-directory-cell.ts` owns the persistent public station directory.
+- `app/data/room-directory-cell.ts` owns the persistent public room directory.
 - `app/data/radio-room-cell.ts` owns one room's SQLite state, WebSockets, queue, and playback.
 - `app/data/radio-room-store.ts` owns the room's SQLite schema and persistence operations.
 - `app/routes.ts` and `app/actions/` own the server-rendered page contract.
