@@ -71,6 +71,13 @@ be imported into the `TRACKS` object bucket and queues recreated (or migrated wi
 one-off tool) before those volumes are retired. Running nodes poll the fleet deployment pointer,
 so later `celld deploy` releases are adopted without rebuilding or restarting the node image.
 
+For a self-hosted, single-node installation, the `deployer` Docker target supports the same Azurite
+bootstrap used by the infrastructure repository: it creates the configured blob container, runs
+Celld's conditional-write diagnostic, and deploys Radio. CI publishes this target as
+`ghcr.io/jackharrhy/radio-celld-deployer`. Azurite is an emulator, not a Celld-qualified production
+store; keep it private, pin its version, persist and back up both its data and `CELLD_WATCH`, and use
+this topology only where that single-host durability tradeoff is acceptable.
+
 The application still has no accounts or room-level authorization. Treat every room and mutation
 as private behind the existing host-wide BasicAuth boundary.
 
