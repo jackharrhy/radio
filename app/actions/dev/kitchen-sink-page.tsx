@@ -1,11 +1,6 @@
 import { css, type Handle, type RemixNode } from "remix/ui";
 
-import {
-  RadioGateView,
-  RadioPlayerView,
-  StatusPill,
-  TrackList,
-} from "../../assets/radio-room-components.tsx";
+import { RadioPlayerView, StatusPill, TrackList } from "../../assets/radio-room-components.tsx";
 import { radioStyle } from "../../assets/radio-room-styles.ts";
 import { DEFAULT_SYNC_DIAGNOSTICS, type RadioClientState } from "../../assets/radio-client.ts";
 import type { ClientInfo, Track } from "../../data/protocol.ts";
@@ -76,7 +71,6 @@ export function KitchenSinkPage() {
           <nav aria-label="Kitchen sink sections" mix={sinkStyle.nav}>
             <a href="#tokens">tokens</a>
             <a href="#controls">controls</a>
-            <a href="#gate">gate</a>
             <a href="#status">status</a>
             <a href="#buffering">buffering</a>
             <a href="#player">player</a>
@@ -179,17 +173,6 @@ export function KitchenSinkPage() {
                   <div mix={desktopStyle.panel}>panel</div>
                   <div mix={desktopStyle.messageCard}>card</div>
                 </div>
-              </Specimen>
-            </div>
-          </SinkSection>
-
-          <SinkSection id="gate" title="gate">
-            <div mix={sinkStyle.gateGrid}>
-              <Specimen label="empty">
-                <RadioGateView nameInput="" />
-              </Specimen>
-              <Specimen label="filled">
-                <RadioGateView nameInput="Jack" />
               </Specimen>
             </div>
           </SinkSection>
@@ -533,12 +516,6 @@ const sinkStyle = {
     display: "grid",
     gap: "8px",
     "& > div": { minHeight: "36px" },
-  }),
-  gateGrid: css({
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "8px",
-    "@media (max-width: 760px)": { gridTemplateColumns: "1fr" },
   }),
   statusGrid: css({
     display: "grid",

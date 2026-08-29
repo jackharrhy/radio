@@ -10,15 +10,18 @@ Install Node.js 26+, dependencies, and Celld 0.4.0 or newer:
 
 ```sh
 npm install
+cp .dev.vars.example .dev.vars
 curl -fsSL https://celld.dev/install.sh | sh
 npm run dev
 ```
 
 Wrangler provides the normal local development server. Use `npm run dev:celld` for a compatibility
 run on the real Celld runtime, which serves <http://127.0.0.1:9876> and stores its local state under
-`.celld/dev/`. Celld 0.4.0 currently detects a spurious source change after startup in this repo;
+`.celld/dev/`. For this run, expose the same values as `CELLD_VAR_RADIO_PASSWORD` and
+`CELLD_VAR_RADIO_SESSION_SECRET`. Celld 0.4.0 currently detects a spurious source change after startup in this repo;
 the application works, but its development watcher may repeatedly rebuild. The root redirects to
-the default `cozy` room; any valid slug can be opened at `/rooms/:roomSlug`.
+the public station lobby. `cozy` is seeded automatically, and authenticated listeners can create
+additional persistent stations there.
 
 Client assets are prebuilt into ignored `dist/client/` files because a Worker has no source
 filesystem from which `remix/assets` can compile modules on demand.
@@ -39,7 +42,8 @@ npx remix doctor
 `wrangler.jsonc` is accepted by both Celld and Wrangler. A Celld fleet runs one deployed
 application and stores its deployment, cell databases, ownership records, and replication state
 in its configured fleet bucket. The `TRACKS` binding is a separate logical R2 bucket within that
-deployment.
+deployment. Public TLS remains Traefik's responsibility; Radio owns shared-password login and its
+signed 30-day listener session.
 
 Build and publish the application to a configured fleet bucket:
 
@@ -62,9 +66,11 @@ application are deliberately separate operations. Before rolling the image into 
 3. For a multi-node fleet, override the image's loopback-only `CELLD_INTERNAL_ADDR`, set a unique
    peer-reachable `CELLD_ADVERTISE` value on each node, and keep that listener private. The
    loopback default intentionally supports only one node.
-4. Point Traefik at port `44100`, preserve the host-wide BasicAuth policy, and replace both
-   forwarded host/protocol headers before enabling `CELLD_TRUST_FORWARDED_HEADERS=1`.
-5. Confirm the root health check and a WebSocket room join.
+4. Set `CELLD_VAR_RADIO_PASSWORD` and a random 32-character-or-longer
+   `CELLD_VAR_RADIO_SESSION_SECRET` on every node. Point Traefik at port `44100`, replace both
+   forwarded host/protocol headers before enabling `CELLD_TRUST_FORWARDED_HEADERS=1`, and rate
+   limit the `/join` endpoint.
+5. Confirm the public lobby, signed login, room creation, and a WebSocket room join.
 
 Running nodes poll the fleet deployment pointer, so later `celld deploy` releases are adopted
 without rebuilding or restarting the node image.
@@ -74,12 +80,15 @@ For a self-hosted installation, CI publishes the generic deployer target as
 production deployment uses private, persistent MinIO storage and runs `celld diagnose` before
 deploying.
 
-The application still has no accounts or room-level authorization. Treat every room and mutation
-as private behind the existing host-wide BasicAuth boundary.
+The application still has no individual accounts or room-level authorization. Every holder of the
+shared password can see, create, and mutate every station.
 
 ## Room and storage ownership
 
-- `worker.ts` owns public request dispatch, Remix SSR, uploads, and ranged media responses.
+- `worker.ts` owns only Worker startup and public request dispatch.
+- `app/data/worker-radio-runtime.ts` owns Durable Object and object-storage adapters, uploads, and
+  ranged media responses.
+- `app/data/room-directory-cell.ts` owns the persistent public station directory.
 - `app/data/radio-room-cell.ts` owns one room's SQLite state, WebSockets, queue, and playback.
 - `app/data/radio-room-store.ts` owns the room's SQLite schema and persistence operations.
 - `app/routes.ts` and `app/actions/` own the server-rendered page contract.

@@ -12,45 +12,6 @@ import { AudioVisualizer, AudioVisualizerPreview } from "./audio-visualizer.tsx"
 import type { RadioClient, RadioClientState } from "./radio-client.ts";
 import { radioStyle } from "./radio-room-styles.ts";
 
-export function RadioGateView(
-  handle: Handle<{
-    nameInput: string;
-    onNameInput?: (value: string) => void;
-    onJoin?: () => void;
-  }>,
-) {
-  return () => (
-    <section mix={[radioStyle.window, radioStyle.gate]}>
-      <form
-        aria-label="Join radio"
-        mix={[
-          radioStyle.gateForm,
-          on("submit", (event) => {
-            event.preventDefault();
-            handle.props.onJoin?.();
-          }),
-        ]}
-      >
-        <input
-          aria-label="Name"
-          name="name"
-          type="text"
-          autocomplete="name"
-          placeholder="name"
-          value={handle.props.nameInput}
-          mix={[
-            radioStyle.input,
-            on("input", (event) => handle.props.onNameInput?.(event.currentTarget.value)),
-          ]}
-        />
-        <button aria-label="Join radio" mix={radioStyle.smallPrimaryButton} type="submit">
-          join radio
-        </button>
-      </form>
-    </section>
-  );
-}
-
 export function RadioPlayerView(
   handle: Handle<{
     state: RadioClientState;
@@ -113,6 +74,9 @@ export function RadioPlayerView(
         ]}
       >
         <header mix={[radioStyle.titleBar, radioStyle.topBar]}>
+          <a href="/" mix={radioStyle.stationLink}>
+            stations
+          </a>
           <StatusPill state={state} />
         </header>
 

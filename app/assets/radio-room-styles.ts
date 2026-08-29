@@ -45,6 +45,7 @@ export const radioStyle = {
   pageShell: css({ height: "90vh" }),
   previewShell: css({ height: "600px" }),
   topBar: css({ justifyContent: "flex-end" }),
+  stationLink: css({ color: "#fff", marginRight: "auto" }),
   statusPill: css({
     width: "12px",
     flex: "0 0 12px",
@@ -424,20 +425,6 @@ export const radioStyle = {
     borderBottom: `1px solid ${desktopColor.wash}`,
     background: "#fff",
     "& small": { color: "#465156" },
-  }),
-  gate: css({
-    width: "min(520px, 100%)",
-    margin: "0 auto",
-    display: "grid",
-    gap: 0,
-    padding: 0,
-  }),
-  gateForm: css({
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    gap: "4px",
-    alignItems: "center",
-    margin: "4px",
   }),
   controlBar: css({
     display: "grid",

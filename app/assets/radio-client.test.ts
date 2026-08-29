@@ -185,7 +185,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: pausedSnapshot,
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -229,7 +228,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -264,7 +262,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -307,7 +304,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -340,7 +336,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -360,7 +355,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
       deviceCompensationMs: 35,
@@ -391,7 +385,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -422,7 +415,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -444,7 +436,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -471,7 +462,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });
@@ -502,7 +492,6 @@ describe("RadioClient playback UI behavior", () => {
     client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
       uploadContent: async ({ onProgress }) => {
@@ -528,7 +517,6 @@ describe("RadioClient playback UI behavior", () => {
     let client = new RadioClient({
       initialSnapshot: snapshot(),
       clientId: "client-1",
-      name: "Ada",
       audioManager: audio,
       mediaElement: audio.media as unknown as HTMLMediaElement,
     });

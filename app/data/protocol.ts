@@ -50,7 +50,6 @@ export type ClientMessage =
   | {
       type: "JOIN";
       clientId: string;
-      name: string;
     }
   | {
       type: "NTP_REQUEST";
@@ -167,8 +166,8 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
 
   switch (message.type) {
     case "JOIN":
-      if (typeof message.clientId === "string" && typeof message.name === "string") {
-        return { type: "JOIN", clientId: message.clientId, name: message.name };
+      if (typeof message.clientId === "string") {
+        return { type: "JOIN", clientId: message.clientId };
       }
       return null;
     case "NTP_REQUEST":

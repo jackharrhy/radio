@@ -5,9 +5,21 @@ import { createAppRouter } from "../../router.ts";
 import { routes } from "../../routes.ts";
 
 it("renders the development kitchen sink with representative radio states", async () => {
-  let router = createAppRouter({
-    fetch: () => Promise.resolve(new Response("Room service unavailable", { status: 503 })),
-  });
+  let router = createAppRouter(
+    {
+      listRooms: () => Promise.resolve([]),
+      getRoom: () => Promise.resolve(null),
+      createRoom: () => Promise.resolve("created"),
+      fetchRoom: () => Promise.resolve(new Response("Room service unavailable", { status: 503 })),
+      uploadTrack: () => Promise.resolve(new Response("Room service unavailable", { status: 503 })),
+      serveTrack: () => Promise.resolve(new Response("Room service unavailable", { status: 503 })),
+    },
+    {
+      password: "test-password",
+      sessionSecret: "test-session-secret-that-is-at-least-32-characters",
+      secureCookies: false,
+    },
+  );
   let response = await router.fetch(
     new Request(`http://localhost${routes.dev.kitchenSink.href()}`),
   );
