@@ -14,9 +14,11 @@ export function render() {
           signal: request.signal,
           resolveFrame: (src) => resolveFrame(router, request, src),
           // Server rendering turns client entries into browser module URLs.
-          async resolveClientEntry(entryId, component) {
-            if (entryId !== "radio-room") throw new Error(`Unknown client entry '${entryId}'`);
-            return { href: browserAssets.radioRoom, exportName: component.name || "RadioRoom" };
+          async resolveClientEntry(entryId) {
+            if (entryId !== "radio-room#RadioRoom") {
+              throw new Error(`Unknown client entry '${entryId}'`);
+            }
+            return { href: browserAssets.radioRoom, exportName: "RadioRoom" };
           },
         });
 

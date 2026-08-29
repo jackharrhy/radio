@@ -136,6 +136,8 @@ describe("Worker HTTP boundary", () => {
     expect(html).toContain("radio-room");
     expect(html).toMatch(/\/assets\/entry-[A-Z0-9]+\.js/);
     expect(html).toMatch(/\/assets\/radio-room-[A-Z0-9]+\.js/);
+    expect(html).toContain('"exportName":"RadioRoom"');
+    expect(html).not.toContain('"exportName":"RadioRoom2"');
   });
 
   it("streams uploads to object storage and serves byte ranges", async () => {
