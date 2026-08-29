@@ -64,19 +64,15 @@ application are deliberately separate operations. Before rolling the image into 
    loopback default intentionally supports only one node.
 4. Point Traefik at port `44100`, preserve the host-wide BasicAuth policy, and replace both
    forwarded host/protocol headers before enabling `CELLD_TRUST_FORWARDED_HEADERS=1`.
-5. Confirm the root health check and a WebSocket room join before removing the old container.
+5. Confirm the root health check and a WebSocket room join.
 
-The former `/app/public/uploads` and `/app/tmp` volumes are not read by Celld. Existing audio must
-be imported into the `TRACKS` object bucket and queues recreated (or migrated with a purpose-built
-one-off tool) before those volumes are retired. Running nodes poll the fleet deployment pointer,
-so later `celld deploy` releases are adopted without rebuilding or restarting the node image.
+Running nodes poll the fleet deployment pointer, so later `celld deploy` releases are adopted
+without rebuilding or restarting the node image.
 
-For a self-hosted, single-node installation, the `deployer` Docker target supports the same Azurite
-bootstrap used by the infrastructure repository: it creates the configured blob container, runs
-Celld's conditional-write diagnostic, and deploys Radio. CI publishes this target as
-`ghcr.io/jackharrhy/radio-celld-deployer`. Azurite is an emulator, not a Celld-qualified production
-store; keep it private, pin its version, persist and back up both its data and `CELLD_WATCH`, and use
-this topology only where that single-host durability tradeoff is acceptable.
+For a self-hosted installation, CI publishes the generic deployer target as
+`ghcr.io/jackharrhy/radio-celld-deployer`. Provision the configured bucket before running it. The
+production deployment uses private, persistent MinIO storage and runs `celld diagnose` before
+deploying.
 
 The application still has no accounts or room-level authorization. Treat every room and mutation
 as private behind the existing host-wide BasicAuth boundary.

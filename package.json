@@ -26,7 +26,6 @@
     "remix": "3.0.0-beta.5"
   },
   "devDependencies": {
-    "@azure/storage-blob": "^12.33.0",
     "@cloudflare/vitest-plugin": "^1.1.2",
     "@types/node": "^26.2.0",
     "esbuild": "^0.28.2",

@@ -5,13 +5,12 @@ import { DEFAULT_SYNC_DIAGNOSTICS, RadioClient, type RadioClientState } from "./
 import { RadioGateView, RadioPlayerView } from "./radio-room-components.tsx";
 
 interface RadioRoomProps extends SerializableProps {
-  roomSlug?: string;
   initialSnapshot: RoomSnapshot;
 }
 
 export const RadioRoom = clientEntry(
   "radio-room#RadioRoom",
-  function RadioRoom(handle: Handle<RadioRoomProps>) {
+  function RadioRoomComponent(handle: Handle<RadioRoomProps>) {
     let initialSnapshot = handle.props.initialSnapshot;
     let client: RadioClient | null = null;
     let name = "";
@@ -46,7 +45,6 @@ export const RadioRoom = clientEntry(
       let clientId = getOrCreateClientId();
       let deviceCompensationMs = readDeviceCompensation();
       client = new RadioClient({
-        roomSlug: handle.props.roomSlug ?? initialSnapshot.roomId,
         initialSnapshot,
         clientId,
         name,

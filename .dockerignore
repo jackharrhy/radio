@@ -7,7 +7,5 @@
 dist
 node_modules
 public/fonts/*.woff2
-public/uploads
-tmp
 .DS_Store
 npm-debug.log*
