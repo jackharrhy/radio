@@ -1,7 +1,8 @@
 import * as assert from "remix/assert";
 import { afterEach, beforeEach, describe, it } from "remix/test";
 
-import { ROOM_ID, type RoomSnapshot } from "../data/protocol.ts";
+import type { RoomSnapshot } from "../data/protocol.ts";
+import { DEFAULT_ROOM_SLUG } from "../data/room-id.ts";
 import { RadioClient } from "./radio-client.ts";
 
 type Listener = (event?: unknown) => void;
@@ -38,6 +39,7 @@ class FakeMediaElement extends EventTarget {
   duration = 120;
   readyState = 0;
   paused = true;
+  playbackRate = 1;
   failLoad = false;
   buffered = { length: 0, end: () => 0 } as unknown as TimeRanges;
 
@@ -76,10 +78,24 @@ class FakeMediaElement extends EventTarget {
 
 class FakeAudioManager {
   media = new FakeMediaElement();
+  audibleAt: number | null = null;
+  mutedAt: number | null = null;
 
   async resume(): Promise<void> {}
   setMasterGain(): void {}
   connectMediaElement(): void {}
+  muteNow(): void {}
+  scheduleAudibleAt(localEpochTime: number): number {
+    this.audibleAt = localEpochTime;
+    return 1;
+  }
+  scheduleMuteAt(localEpochTime: number): number {
+    this.mutedAt = localEpochTime;
+    return 1;
+  }
+  outputLatencyMs(): number {
+    return 12;
+  }
 }
 
 let originalWebSocket: typeof globalThis.WebSocket | undefined;
@@ -87,11 +103,13 @@ let originalWindow: typeof globalThis.window | undefined;
 let originalFetch: typeof globalThis.fetch | undefined;
 let sockets: FakeWebSocket[] = [];
 let windowTimers = new Map<number, () => void>();
+let windowIntervals = new Map<number, () => void>();
 let nextWindowTimerId = 1;
 
 beforeEach(() => {
   sockets = [];
   windowTimers = new Map();
+  windowIntervals = new Map();
   nextWindowTimerId = 1;
   originalWebSocket = globalThis.WebSocket;
   originalWindow = globalThis.window;
@@ -113,8 +131,14 @@ beforeEach(() => {
     clearTimeout(id: number) {
       windowTimers.delete(id);
     },
-    setInterval: globalThis.setInterval.bind(globalThis),
-    clearInterval: globalThis.clearInterval.bind(globalThis),
+    setInterval(callback: () => void) {
+      let id = nextWindowTimerId++;
+      windowIntervals.set(id, callback);
+      return id;
+    },
+    clearInterval(id: number) {
+      windowIntervals.delete(id);
+    },
     location: { protocol: "http:", host: "localhost:44100" },
   } as unknown as typeof window;
 
@@ -129,7 +153,7 @@ afterEach(() => {
 
 function snapshot(): RoomSnapshot {
   return {
-    roomId: ROOM_ID,
+    roomId: DEFAULT_ROOM_SLUG,
     tracks: [
       { id: "track-1", title: "Track 1", url: "/uploads/track-1.mp3", addedAt: 1 },
       { id: "track-2", title: "Track 2", url: "/uploads/track-2.mp3", addedAt: 2 },
@@ -328,6 +352,68 @@ describe("RadioClient playback UI behavior", () => {
     client.syncNow();
 
     assert.equal((socket.sent[0] as { type: string }).type, "NTP_REQUEST");
+    client.dispose();
+  });
+
+  it("schedules the audible gate early by the persisted device compensation", async () => {
+    let audio = new FakeAudioManager();
+    let client = new RadioClient({
+      initialSnapshot: snapshot(),
+      clientId: "client-1",
+      name: "Ada",
+      audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
+      deviceCompensationMs: 35,
+    });
+    client.connect();
+    let socket = sockets[0];
+    socket.emit("open");
+    let target = performance.timeOrigin + performance.now() + 500;
+
+    socket.emit(
+      "message",
+      message("SCHEDULED_PLAY", {
+        trackId: "track-1",
+        trackTimeSeconds: 10,
+        serverTimeToExecute: target,
+      }),
+    );
+    await flush();
+
+    assert.ok(audio.audibleAt !== null);
+    assert.ok(Math.abs(audio.audibleAt - (target - 35)) < 2);
+    assert.equal(client.state.outputLatencyMs, 12);
+    client.dispose();
+  });
+
+  it("disciplines playback drift while a track is running", async () => {
+    let audio = new FakeAudioManager();
+    let client = new RadioClient({
+      initialSnapshot: snapshot(),
+      clientId: "client-1",
+      name: "Ada",
+      audioManager: audio,
+      mediaElement: audio.media as unknown as HTMLMediaElement,
+    });
+    client.connect();
+    let socket = sockets[0];
+    socket.emit("open");
+    let target = performance.timeOrigin + performance.now();
+    socket.emit(
+      "message",
+      message("SCHEDULED_PLAY", {
+        trackId: "track-1",
+        trackTimeSeconds: 10,
+        serverTimeToExecute: target,
+      }),
+    );
+    await flush();
+    audio.media.currentTime = 10.2;
+
+    windowIntervals.values().next().value?.();
+
+    assert.equal(audio.media.playbackRate, 0.9992);
+    assert.ok(client.state.playbackErrorMs > 190);
     client.dispose();
   });
 

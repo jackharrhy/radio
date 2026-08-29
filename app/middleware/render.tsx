@@ -1,12 +1,9 @@
-import * as path from "node:path";
-
 import type { Router } from "remix/router";
 import { renderWith } from "remix/middleware/render";
 import { createHtmlResponse } from "remix/response/html";
 import type { RemixNode } from "remix/ui";
 import { renderToStream } from "remix/ui/server";
-
-import { assetServer } from "../assets.ts";
+import { browserAssets } from "../assets/build-manifest.ts";
 
 export function render() {
   return renderWith(
@@ -18,16 +15,8 @@ export function render() {
           resolveFrame: (src) => resolveFrame(router, request, src),
           // Server rendering turns client entries into browser module URLs.
           async resolveClientEntry(entryId, component) {
-            if (!entryId.startsWith("file://")) {
-              throw new Error(
-                `Expected \`import.meta.url\` for clientEntry ID, received '${entryId}'`,
-              );
-            }
-
-            return {
-              href: await assetServer.getHref(entryId),
-              exportName: entryId.split("#")[1] || component.name || titleCaseFileName(entryId),
-            };
+            if (entryId !== "radio-room") throw new Error(`Unknown client entry '${entryId}'`);
+            return { href: browserAssets.radioRoom, exportName: component.name || "RadioRoom" };
           },
         });
 
@@ -59,14 +48,4 @@ async function resolveFrame(router: Router, request: Request, src: string) {
 
   if (response.body) return response.body;
   return await response.text();
-}
-
-function titleCaseFileName(fileUrl: string): string {
-  let url = new URL(fileUrl);
-  let fileName = path.basename(url.pathname, path.extname(url.pathname));
-  return fileName
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean)
-    .map((segment) => segment[0]!.toUpperCase() + segment.slice(1))
-    .join("");
 }

@@ -2,8 +2,9 @@ import * as assert from "remix/assert";
 import { it } from "remix/test";
 import type { Handle } from "remix/ui";
 
-import { ROOM_ID, type RoomSnapshot } from "../data/protocol.ts";
-import { RadioRoom } from "./radio-room.tsx";
+import type { RoomSnapshot } from "../data/protocol.ts";
+import { DEFAULT_ROOM_SLUG } from "../data/room-id.ts";
+import { createClientId, RadioRoom } from "./radio-room.tsx";
 
 class FakeWebSocket extends EventTarget {
   static CONNECTING = 0;
@@ -69,13 +70,24 @@ class FakeMediaElement extends EventTarget {
 
 function snapshot(): RoomSnapshot {
   return {
-    roomId: ROOM_ID,
+    roomId: DEFAULT_ROOM_SLUG,
     tracks: [],
     clients: [],
     playback: { type: "paused", trackId: null, trackTimeSeconds: 0, serverTimeToExecute: 0 },
     volume: 1,
   };
 }
+
+it("creates a client ID when randomUUID is unavailable on an HTTP origin", () => {
+  let id = createClientId({
+    getRandomValues(array) {
+      array.fill(0xab);
+      return array;
+    },
+  });
+
+  assert.equal(id, "abababab-abab-4bab-abab-abababababab");
+});
 
 it("keeps a connecting WebSocket alive across the initial component update", () => {
   let originalAudioContext = globalThis.AudioContext;

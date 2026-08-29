@@ -1,16 +1,19 @@
 # Radio Agent Guide
 
-Radio is a single-room synchronized audio player built with Remix 3. Keep the server-rendered route correct first, then layer the hydrated WebSocket and Web Audio behavior on top.
+Radio is a multi-room synchronized audio player built with Remix 3 and Celld. Keep the
+server-rendered route correct first, then layer the hydrated WebSocket and Web Audio behavior on
+top. Each room is one named Durable Object/cell.
 
 ## Commands
 
 ```sh
 npm install
 npm run dev
+npm run build
 npm run format
 npm run lint
 npm run check
-npm run start
+npm run dev:celld
 npm test
 npm run typecheck
 ```
@@ -30,11 +33,16 @@ Keep an inspection-only clone at `./.upstream/beatsync`. That directory is ignor
 ## Route And Runtime Ownership
 
 - `app/routes.ts` is the URL contract.
-- `app/actions/controller.tsx` owns top-level HTTP responses.
-- `app/router.ts` composes middleware and maps the route contract.
+- `worker.ts` owns the Worker fetch boundary, room-cell dispatch, uploads, and media responses.
+- `app/actions/controller.tsx` owns top-level Remix HTTP responses.
+- `app/router.ts` composes Remix middleware and maps the route contract.
 - `app/middleware/render.tsx` owns request-scoped server rendering.
 - `app/assets/` owns hydrated browser behavior and radio-specific client presentation.
-- `app/data/` owns the protocol, room state, persistence, upload storage, and WebSocket adapter.
+- Keep clock estimation, audio-timeline conversion, and playback drift correction as separate pure
+  models with synthetic skew, jitter, output-latency, and recovery tests.
+- `app/data/radio-room-cell.ts` owns per-room SQLite state, WebSockets, and coordination.
+- `app/data/radio-room-store.ts` owns the per-room SQLite schema and persistence operations.
+- `app/data/` owns the shared protocol, room identity, and timing policy.
 - `app/ui/` owns shared server UI and cross-route visual primitives.
 
 Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` only when a nested route map needs its own actions or middleware. Do not create generic `app/lib/` or `app/components/` buckets.
@@ -49,16 +57,18 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
 
 ## State And Deployment Boundaries
 
-- `public/uploads/` contains ignored local audio files.
-- `tmp/radio-state.json` contains ignored local queue and playback state.
-- The room and connected clients are process-local. The current model requires one process and persistent local storage.
+- `.celld/dev/` contains ignored local cell and object state.
+- `dist/client/` contains ignored, generated browser assets.
+- Each room has isolated SQLite state and hibernatable WebSockets in one named cell.
+- Uploaded audio lives in the `TRACKS` R2-compatible binding, not a filesystem.
 - The app is not ready for an unrestricted public URL: uploads and room mutations have no application-level authentication or authorization.
-- The approved production boundary is one container behind host-wide Traefik BasicAuth, including `/ws`, with persistent mounts at `/app/public/uploads` and `/app/tmp`.
+- The approved production boundary is a Celld fleet behind host-wide Traefik BasicAuth. Expose
+  only its public Worker listener; keep its internal peer/operator listener private.
 - Pushes to `main` publish the single-platform `linux/amd64` image as `ghcr.io/jackharrhy/radio:main`.
 
 ## Verification
 
-- Use route/server tests for HTTP and coordination behavior.
+- Use Remix route/server tests for rendering and real Worker tests for HTTP and coordination behavior.
 - Use component tests only for DOM-specific behavior.
 - Add regression coverage for lifecycle, reconnect, synchronization, and persistence bugs.
 - Finish changes with `npm test`, `npm run typecheck`, `remix doctor`, and a production-mode smoke test.

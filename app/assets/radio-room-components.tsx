@@ -220,8 +220,31 @@ export function RadioPlayerView(
             >
               Sync
             </button>
+            <button
+              mix={[
+                radioStyle.iconButton,
+                on("click", () => client?.setDeviceCompensation(state.deviceCompensationMs + 10)),
+              ]}
+              type="button"
+              aria-label="Play 10 milliseconds earlier"
+              title="Play 10 milliseconds earlier"
+            >
+              −10ms
+            </button>
+            <button
+              mix={[
+                radioStyle.iconButton,
+                on("click", () => client?.setDeviceCompensation(state.deviceCompensationMs - 10)),
+              ]}
+              type="button"
+              aria-label="Play 10 milliseconds later"
+              title="Play 10 milliseconds later"
+            >
+              +10ms
+            </button>
             <div mix={radioStyle.transportReadout}>
               <span>{state.playing ? "playing" : "paused"}</span>
+              <span>{state.deviceCompensationMs}ms calibration</span>
             </div>
           </div>
           <label mix={radioStyle.seek}>
@@ -597,8 +620,12 @@ export function StatusPill(handle: Handle<{ state: RadioClientState }>) {
     let connection = state.connected ? "online" : "offline";
     let synchronization = state.synced ? "synced" : "syncing";
     let latency = `${Math.round(state.rttMs)}ms`;
+    let uncertainty = Number.isFinite(state.syncUncertaintyMs)
+      ? `±${Math.round(state.syncUncertaintyMs)}ms`
+      : "measuring";
+    let quality = `${uncertainty} / ${Math.round(state.clockSkewPpm)}ppm / ${Math.round(state.playbackErrorMs)}ms error`;
     let details = state.connected
-      ? `${connection} / ${synchronization} / ${latency}`
+      ? `${connection} / ${synchronization} / ${latency} / ${quality}`
       : `${connection} / ${synchronization}`;
     let tone = !state.connected ? "offline" : state.synced ? "online" : "syncing";
 

@@ -6,11 +6,11 @@ import type { RoomSnapshot } from "../data/protocol.ts";
 import { desktopColor, desktopThemeStyle } from "./desktop/theme.ts";
 import { Document } from "./document.tsx";
 
-export function RadioPage(handle: Handle<{ snapshot: RoomSnapshot }>) {
+export function RadioPage(handle: Handle<{ roomSlug: string; snapshot: RoomSnapshot }>) {
   return () => (
     <Document title="Radio" head={<RadioHead />}>
       <main mix={[desktopThemeStyle, pageStyle]}>
-        <RadioRoom initialSnapshot={handle.props.snapshot} />
+        <RadioRoom roomSlug={handle.props.roomSlug} initialSnapshot={handle.props.snapshot} />
       </main>
     </Document>
   );

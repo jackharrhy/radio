@@ -1,10 +1,9 @@
-export const ROOM_ID = "cozy";
-
 export const NTP_CONSTANTS = {
   INITIAL_INTERVAL_MS: 50,
   STEADY_STATE_INTERVAL_MS: 2500,
   RESPONSE_TIMEOUT_MS: 3750,
   MAX_MEASUREMENTS: 16,
+  MAX_HISTORY_MEASUREMENTS: 120,
   PROBE_GAP_MS: 25,
   PROBE_GAP_TOLERANCE_MS: 5,
 } as const;
@@ -40,7 +39,7 @@ export type PlaybackState = {
 };
 
 export type RoomSnapshot = {
-  roomId: typeof ROOM_ID;
+  roomId: string;
   tracks: Track[];
   clients: ClientInfo[];
   playback: PlaybackState;

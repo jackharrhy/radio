@@ -1,12 +1,12 @@
-export function getWsUrl(): string {
+export function getWsUrl(roomSlug: string): string {
   let { protocol, host } = window.location;
-  return `${protocol === "https:" ? "wss" : "ws"}://${host}/ws`;
+  return `${protocol === "https:" ? "wss" : "ws"}://${host}/ws/${encodeURIComponent(roomSlug)}`;
 }
 
-export function getTrackCreateUrl(): string {
-  return "/tracks";
+export function getTrackCreateUrl(roomSlug: string): string {
+  return `/api/rooms/${encodeURIComponent(roomSlug)}/tracks`;
 }
 
-export function getTrackContentUrl(trackId: string): string {
-  return `/tracks/${encodeURIComponent(trackId)}/content`;
+export function getTrackContentUrl(roomSlug: string, trackId: string): string {
+  return `/api/rooms/${encodeURIComponent(roomSlug)}/tracks/${encodeURIComponent(trackId)}/content`;
 }
