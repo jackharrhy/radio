@@ -2,7 +2,7 @@ import { addEventListeners, clientEntry, type Handle, type SerializableProps } f
 
 import type { RoomSnapshot } from "../data/protocol.ts";
 import { DEFAULT_SYNC_DIAGNOSTICS, RadioClient, type RadioClientState } from "./radio-client.ts";
-import { RadioGateView, RadioPlayerView } from "./radio-room-components.tsx";
+import { RadioPlayerView } from "./radio-room-components.tsx";
 
 interface RadioRoomProps extends SerializableProps {
   initialSnapshot: RoomSnapshot;
@@ -13,8 +13,6 @@ export const RadioRoom = clientEntry(
   function RadioRoomComponent(handle: Handle<RadioRoomProps>) {
     let initialSnapshot = handle.props.initialSnapshot;
     let client: RadioClient | null = null;
-    let name = "";
-    let nameInput = "";
     let trackInput: HTMLInputElement | null = null;
     let viewportWidth = 960;
     let state: RadioClientState = {
@@ -37,17 +35,13 @@ export const RadioRoom = clientEntry(
       status: "Ready",
     };
 
-    function start(nextName: string) {
+    function start() {
       if (client) return;
-      name = nextName.trim();
-      if (!name) return;
-      localStorage.setItem("radio.name", name);
       let clientId = getOrCreateClientId();
       let deviceCompensationMs = readDeviceCompensation();
       client = new RadioClient({
         initialSnapshot,
         clientId,
-        name,
         deviceCompensationMs,
       });
       client.onState((nextState) => {
@@ -75,26 +69,10 @@ export const RadioRoom = clientEntry(
       };
       updateViewportWidth();
       addEventListeners(window, handle.signal, { resize: updateViewportWidth });
-      name = localStorage.getItem("radio.name")?.trim() ?? "";
-      nameInput = name;
-      if (name) start(name);
-      else handle.update();
+      start();
     });
 
     return () => {
-      if (!name) {
-        return (
-          <RadioGateView
-            nameInput={nameInput}
-            onNameInput={(value) => {
-              nameInput = value;
-              handle.update();
-            }}
-            onJoin={() => start(nameInput)}
-          />
-        );
-      }
-
       return (
         <RadioPlayerView
           state={state}

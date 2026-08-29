@@ -70,6 +70,26 @@ describe("room cells", () => {
     listener.close();
   });
 
+  it("uses the server-provided listener name instead of a JOIN payload name", async () => {
+    let response = await env.RADIO_ROOMS.getByName("identity-room").fetch(
+      "https://cell.test/websocket",
+      {
+        headers: {
+          Upgrade: "websocket",
+          "x-radio-room": "identity-room",
+          "x-radio-listener-name": "Trusted name",
+        },
+      },
+    );
+    let socket = response.webSocket!;
+    socket.accept();
+    let client = new SocketClient(socket);
+    client.send({ type: "JOIN", clientId: "identity-client", name: "Spoofed name" });
+    let state = await client.next("ROOM_STATE");
+    expect(state.snapshot.clients[0]!.name).toBe("Trusted name");
+    client.close();
+  });
+
   it("treats duplicate readiness as one listener and cancels removed pending tracks", async () => {
     let track = await uploadTrack("pending-room", "Pending");
     let first = await join("pending-room", "first");
@@ -125,12 +145,68 @@ describe("room cells", () => {
 });
 
 describe("Worker HTTP boundary", () => {
+  it("keeps the lobby public and protects rooms and mutations", async () => {
+    expect((await request("/")).status).toBe(200);
+    expect((await request("/rooms/cozy", { redirect: "manual" })).status).toBe(303);
+    expect((await request("/api/rooms/cozy/tracks", { method: "POST" })).status).toBe(401);
+  });
+
+  it("rejects a wrong password and accepts a signed session", async () => {
+    let rejected = await request("/join", {
+      method: "POST",
+      body: new URLSearchParams({ name: "Ada", password: "wrong", roomSlug: "cozy" }),
+      redirect: "manual",
+    });
+    expect(rejected.status).toBe(303);
+    expect(rejected.headers.get("Location")).toBe("/?room=cozy");
+
+    let accepted = await login("Ada");
+    let page = await request("/rooms/cozy", { headers: { Cookie: accepted } });
+    expect(page.status).toBe(200);
+  });
+
+  it("rejects a tampered session cookie", async () => {
+    let cookie = await login("Ada");
+    let replacement = cookie.endsWith("a") ? "b" : "a";
+    let tampered = cookie.slice(0, -1) + replacement;
+    let response = await request("/rooms/cozy", {
+      headers: { Cookie: tampered },
+      redirect: "manual",
+    });
+    expect(response.status).toBe(303);
+  });
+
+  it("creates directory entries through the authenticated form", async () => {
+    let cookie = await login("Creator");
+    let created = await request("/rooms", {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: new URLSearchParams({ name: "Late Night", slug: "late-night" }),
+      redirect: "manual",
+    });
+    expect(created.status).toBe(303);
+    expect(created.headers.get("Location")).toBe("/rooms/late-night");
+
+    let lobby = await request("/");
+    expect(await lobby.text()).toContain("Late Night");
+  });
+
+  it("rejects unsafe cross-origin form submissions", async () => {
+    let response = await request("/join", {
+      method: "POST",
+      headers: { Origin: "https://attacker.test" },
+      body: new URLSearchParams({ name: "Ada", password: "test-password", roomSlug: "cozy" }),
+    });
+    expect(response.status).toBe(403);
+  });
+
   it("renders room-specific Remix pages", async () => {
     let root = await request("/", { redirect: "manual" });
-    expect(root.status).toBe(302);
-    expect(root.headers.get("Location")).toBe("/rooms/cozy");
+    expect(root.status).toBe(200);
+    expect(await root.text()).toContain("Choose a room.");
 
-    let page = await request("/rooms/http-room");
+    await ensureRoom("http-room", "HTTP room");
+    let page = await authorizedRequest("/rooms/http-room");
     expect(page.status).toBe(200);
     let html = await page.text();
     expect(html).toContain("radio-room");
@@ -142,25 +218,26 @@ describe("Worker HTTP boundary", () => {
 
   it("streams uploads to object storage and serves byte ranges", async () => {
     let track = await uploadTrack("media-room", "Media");
-    let response = await request(track.url, { headers: { Range: "bytes=1-2" } });
+    let response = await authorizedRequest(track.url, { headers: { Range: "bytes=1-2" } });
 
     expect(response.status).toBe(206);
     expect(response.headers.get("Content-Range")).toBe("bytes 1-2/4");
     expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([2, 3]);
 
-    let suffix = await request(track.url, { headers: { Range: "bytes=-2" } });
+    let suffix = await authorizedRequest(track.url, { headers: { Range: "bytes=-2" } });
     expect(suffix.headers.get("Content-Range")).toBe("bytes 2-3/4");
     expect([...new Uint8Array(await suffix.arrayBuffer())]).toEqual([3, 4]);
   });
 
   it("marks interrupted uploads failed without exposing partial media", async () => {
-    let metadata = await request("/api/rooms/failed-upload/tracks", {
+    await ensureRoom("failed-upload", "Failed upload");
+    let metadata = await authorizedRequest("/api/rooms/failed-upload/tracks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "broken.mp3", mediaType: "audio/mpeg", sizeBytes: 4 }),
     });
     let track = (await metadata.json<{ track: Track }>()).track;
-    let content = await request(`/api/rooms/failed-upload/tracks/${track.id}/content`, {
+    let content = await authorizedRequest(`/api/rooms/failed-upload/tracks/${track.id}/content`, {
       method: "PUT",
       headers: { "Content-Type": "audio/mpeg", "Content-Length": "3" },
       body: new Uint8Array([1, 2, 3]),
@@ -168,12 +245,13 @@ describe("Worker HTTP boundary", () => {
 
     expect(content.status).toBe(400);
     expect((await snapshot("failed-upload")).tracks[0]!.upload?.status).toBe("failed");
-    expect((await request(track.url)).status).toBe(404);
+    expect((await authorizedRequest(track.url)).status).toBe(404);
   });
 });
 
 async function uploadTrack(roomSlug: string, title: string): Promise<Track> {
-  let metadata = await request(`/api/rooms/${roomSlug}/tracks`, {
+  await ensureRoom(roomSlug, title);
+  let metadata = await authorizedRequest(`/api/rooms/${roomSlug}/tracks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: `${title}.mp3`, mediaType: "audio/mpeg", sizeBytes: 4 }),
@@ -181,7 +259,7 @@ async function uploadTrack(roomSlug: string, title: string): Promise<Track> {
   expect(metadata.status).toBe(201);
   let pending = (await metadata.json<{ track: Track }>()).track;
 
-  let content = await request(`/api/rooms/${roomSlug}/tracks/${pending.id}/content`, {
+  let content = await authorizedRequest(`/api/rooms/${roomSlug}/tracks/${pending.id}/content`, {
     method: "PUT",
     headers: { "Content-Type": "audio/mpeg", "Content-Length": "4" },
     body: new Uint8Array([1, 2, 3, 4]),
@@ -199,12 +277,18 @@ async function snapshot(roomSlug: string): Promise<RoomSnapshot> {
 }
 
 async function join(roomSlug: string, clientId: string): Promise<SocketClient> {
-  let response = await request(`/ws/${roomSlug}`, { headers: { Upgrade: "websocket" } });
+  let response = await env.RADIO_ROOMS.getByName(roomSlug).fetch("https://cell.test/websocket", {
+    headers: {
+      Upgrade: "websocket",
+      "x-radio-room": roomSlug,
+      "x-radio-listener-name": clientId,
+    },
+  });
   expect(response.status).toBe(101);
   let socket = response.webSocket!;
   socket.accept();
   let client = new SocketClient(socket);
-  client.send({ type: "JOIN", clientId, name: clientId });
+  client.send({ type: "JOIN", clientId });
   await client.next("ROOM_STATE");
   return client;
 }
@@ -256,4 +340,36 @@ class SocketClient {
 
 function request(pathname: string, init?: RequestInit): Promise<Response> {
   return exports.default.fetch(new Request(origin + pathname, init));
+}
+
+let sessionCookie: string | null = null;
+
+async function authorizedRequest(pathname: string, init: RequestInit = {}): Promise<Response> {
+  if (!sessionCookie) {
+    sessionCookie = await login("Test listener");
+  }
+  let headers = new Headers(init.headers);
+  headers.set("Cookie", sessionCookie!);
+  return request(pathname, { ...init, headers });
+}
+
+async function login(name: string): Promise<string> {
+  let body = new URLSearchParams({ name, password: "test-password", roomSlug: "cozy" });
+  let response = await request("/join", { method: "POST", body, redirect: "manual" });
+  expect(response.status).toBe(303);
+  let cookie = response.headers.get("Set-Cookie")?.split(";", 1)[0];
+  expect(cookie).toBeTruthy();
+  return cookie!;
+}
+
+async function ensureRoom(slug: string, name: string): Promise<void> {
+  let response = await env.ROOM_DIRECTORY.getByName("global").fetch(
+    `https://directory.test/rooms/${slug}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  );
+  expect([201, 409]).toContain(response.status);
 }

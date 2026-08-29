@@ -14,7 +14,8 @@ import {
   validateUploadMetadata,
 } from "./track-metadata.ts";
 
-type SocketAttachment = ClientInfo;
+type SocketAttachment = { state: "pending"; name: string } | ({ state: "joined" } & ClientInfo);
+type JoinedSocketAttachment = Extract<SocketAttachment, { state: "joined" }>;
 
 const AUDIO_LOAD_TIMEOUT_MS = 3000;
 
@@ -56,12 +57,12 @@ export class RadioRoomCell extends DurableObject<Env> {
       return;
     }
     if (message.type === "JOIN") {
-      this.join(socket, message.clientId, message.name);
+      this.join(socket, message.clientId);
       return;
     }
 
     let client = socket.deserializeAttachment() as SocketAttachment | null;
-    if (!client) {
+    if (!client || client.state !== "joined") {
       this.send(socket, { type: "ERROR", message: "Join before sending commands" });
       return;
     }
@@ -154,23 +155,34 @@ export class RadioRoomCell extends DurableObject<Env> {
       return new Response("Expected WebSocket upgrade", { status: 426 });
     }
     let pair = new WebSocketPair();
+    let name = request.headers.get("x-radio-listener-name")?.trim();
+    if (!name) return new Response("Missing listener identity", { status: 401 });
     this.ctx.acceptWebSocket(pair[1]);
+    pair[1].serializeAttachment({ state: "pending", name } satisfies SocketAttachment);
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
-  private join(socket: WebSocket, clientId: string, requestedName: string): void {
+  private join(socket: WebSocket, clientId: string): void {
     let previous = socket.deserializeAttachment() as SocketAttachment | null;
+    if (!previous) {
+      this.send(socket, { type: "ERROR", message: "Missing listener identity" });
+      socket.close(1008);
+      return;
+    }
     for (let existing of this.ctx.getWebSockets()) {
       let info = existing.deserializeAttachment() as SocketAttachment | null;
-      if (existing !== socket && info?.clientId === clientId) existing.close(1000);
+      if (existing !== socket && info?.state === "joined" && info.clientId === clientId) {
+        existing.close(1000);
+      }
     }
     socket.serializeAttachment({
+      state: "joined",
       clientId,
-      name: requestedName.trim() || previous?.name || "Someone",
-      rtt: previous?.rtt ?? 0,
-      compensationMs: previous?.compensationMs ?? 0,
-      nudgeMs: previous?.nudgeMs ?? 0,
-      joinedAt: previous?.joinedAt ?? Date.now(),
+      name: previous.name,
+      rtt: previous.state === "joined" ? previous.rtt : 0,
+      compensationMs: previous.state === "joined" ? previous.compensationMs : 0,
+      nudgeMs: previous.state === "joined" ? previous.nudgeMs : 0,
+      joinedAt: previous.state === "joined" ? previous.joinedAt : Date.now(),
       lastSeenAt: Date.now(),
     } satisfies SocketAttachment);
     this.send(socket, { type: "ROOM_STATE", snapshot: this.store.snapshot(this.clients()) });
@@ -180,7 +192,7 @@ export class RadioRoomCell extends DurableObject<Env> {
 
   private processClockProbe(
     socket: WebSocket,
-    client: SocketAttachment,
+    client: JoinedSocketAttachment,
     message: Extract<ReturnType<typeof parseClientMessage>, { type: "NTP_REQUEST" }>,
   ): void {
     if (message.clientRTT !== undefined && message.clientRTT > 0) {
@@ -326,7 +338,7 @@ export class RadioRoomCell extends DurableObject<Env> {
     return this.ctx
       .getWebSockets()
       .map((socket) => socket.deserializeAttachment() as SocketAttachment | null)
-      .filter((info): info is SocketAttachment => info !== null);
+      .filter((info): info is JoinedSocketAttachment => info?.state === "joined");
   }
 
   private connectionLeft(): void {

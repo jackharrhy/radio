@@ -96,10 +96,7 @@ it("keeps a connecting WebSocket alive across the initial component update", () 
   let originalWebSocket = globalThis.WebSocket;
   let originalWindow = globalThis.window;
   let sockets: FakeWebSocket[] = [];
-  let storage = new Map([
-    ["radio.clientId", "client-1"],
-    ["radio.name", "Jack"],
-  ]);
+  let storage = new Map([["radio.clientId", "client-1"]]);
 
   try {
     globalThis.AudioContext = FakeAudioContext as unknown as typeof AudioContext;

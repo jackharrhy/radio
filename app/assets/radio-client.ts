@@ -99,7 +99,6 @@ export class RadioClient extends EventTarget {
     private readonly options: {
       initialSnapshot: RoomSnapshot;
       clientId: string;
-      name: string;
       audioManager?: RadioAudioManager;
       mediaElement?: HTMLMediaElement;
       uploadContent?: UploadContent;
@@ -165,7 +164,7 @@ export class RadioClient extends EventTarget {
     this.socket = new WebSocket(getWsUrl(this.options.initialSnapshot.roomId));
     this.socket.addEventListener("open", () => {
       this.setState({ connected: true, status: "Connected" });
-      this.send({ type: "JOIN", clientId: this.options.clientId, name: this.options.name });
+      this.send({ type: "JOIN", clientId: this.options.clientId });
       this.startHeartbeat();
     });
     this.socket.addEventListener("message", (event) => {
