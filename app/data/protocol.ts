@@ -1,5 +1,3 @@
-export const ROOM_ID = "cozy";
-
 export const NTP_CONSTANTS = {
   INITIAL_INTERVAL_MS: 50,
   STEADY_STATE_INTERVAL_MS: 2500,
@@ -40,7 +38,7 @@ export type PlaybackState = {
 };
 
 export type RoomSnapshot = {
-  roomId: typeof ROOM_ID;
+  roomId: string;
   tracks: Track[];
   clients: ClientInfo[];
   playback: PlaybackState;

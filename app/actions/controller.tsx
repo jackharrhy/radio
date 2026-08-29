@@ -1,20 +1,13 @@
 import { createController } from "remix/router";
 
-import { assetServer } from "../assets.ts";
-import { radioSpace } from "../data/radio-space.ts";
+import { DEFAULT_ROOM_SLUG, roomPath } from "../data/room-id.ts";
 import { routes } from "../routes.ts";
-import { RadioPage } from "../ui/radio-page.tsx";
+import { redirect } from "remix/response/redirect";
 
 export default createController(routes, {
   actions: {
-    async assets(context) {
-      return (
-        (await assetServer.fetch(context.request)) ?? new Response("Not Found", { status: 404 })
-      );
-    },
-    async home(context) {
-      await radioSpace.load();
-      return context.render(<RadioPage snapshot={radioSpace.snapshot()} />);
+    home() {
+      return redirect(roomPath(DEFAULT_ROOM_SLUG));
     },
   },
 });

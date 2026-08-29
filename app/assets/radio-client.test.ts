@@ -1,7 +1,8 @@
 import * as assert from "remix/assert";
 import { afterEach, beforeEach, describe, it } from "remix/test";
 
-import { ROOM_ID, type RoomSnapshot } from "../data/protocol.ts";
+import type { RoomSnapshot } from "../data/protocol.ts";
+import { DEFAULT_ROOM_SLUG } from "../data/room-id.ts";
 import { RadioClient } from "./radio-client.ts";
 
 type Listener = (event?: unknown) => void;
@@ -129,7 +130,7 @@ afterEach(() => {
 
 function snapshot(): RoomSnapshot {
   return {
-    roomId: ROOM_ID,
+    roomId: DEFAULT_ROOM_SLUG,
     tracks: [
       { id: "track-1", title: "Track 1", url: "/uploads/track-1.mp3", addedAt: 1 },
       { id: "track-2", title: "Track 2", url: "/uploads/track-2.mp3", addedAt: 2 },

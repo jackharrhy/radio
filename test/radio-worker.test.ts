@@ -1,0 +1,254 @@
+import { env, exports } from "cloudflare:workers";
+import { evictDurableObject, runDurableObjectAlarm } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
+
+import {
+  parseServerMessage,
+  type RoomSnapshot,
+  type ServerMessage,
+  type Track,
+} from "../app/data/protocol.ts";
+
+const origin = "https://radio.test";
+
+describe("room cells", () => {
+  it("isolates room state and restores it after eviction", async () => {
+    let track = await uploadTrack("studio", "Studio tone");
+
+    expect((await snapshot("studio")).tracks).toEqual([track]);
+    expect((await snapshot("cozy")).tracks).toEqual([]);
+
+    await evictDurableObject(env.RADIO_ROOMS.getByName("studio"));
+    expect((await snapshot("studio")).tracks).toEqual([track]);
+  });
+
+  it("waits for every listener before scheduling playback", async () => {
+    let track = await uploadTrack("ready-room", "Ready tone");
+    let first = await join("ready-room", "first");
+    let second = await join("ready-room", "second");
+
+    first.send({ type: "PLAY", trackId: track.id, trackTimeSeconds: 4 });
+    expect((await first.next("LOAD_TRACK")).track).toEqual(track);
+    await second.next("LOAD_TRACK");
+    expect((await first.next("TRACK_BUFFERING")).readyClientCount).toBe(0);
+
+    first.send({ type: "TRACK_READY", trackId: track.id });
+    expect((await first.next("TRACK_BUFFERING")).readyClientCount).toBe(1);
+    first.expectNoMessage("SCHEDULED_PLAY");
+
+    second.send({ type: "TRACK_READY", trackId: track.id });
+    let scheduled = await first.next("SCHEDULED_PLAY");
+    expect(scheduled.trackId).toBe(track.id);
+    expect(scheduled.trackTimeSeconds).toBe(4);
+
+    first.close();
+    second.close();
+  });
+
+  it("uses its alarm when a listener never becomes ready", async () => {
+    let track = await uploadTrack("timeout-room", "Timeout tone");
+    let listener = await join("timeout-room", "listener");
+
+    listener.send({ type: "PLAY", trackId: track.id, trackTimeSeconds: 0 });
+    await listener.next("LOAD_TRACK");
+    expect(await runDurableObjectAlarm(env.RADIO_ROOMS.getByName("timeout-room"))).toBe(true);
+    expect((await listener.next("SCHEDULED_PLAY")).trackId).toBe(track.id);
+
+    listener.close();
+  });
+
+  it("keeps hibernatable sockets and durable playback state across eviction", async () => {
+    let listener = await join("hibernate-room", "listener");
+    let stub = env.RADIO_ROOMS.getByName("hibernate-room");
+
+    await evictDurableObject(stub);
+    listener.send({ type: "SET_VOLUME", volume: 0.35 });
+    expect((await listener.next("VOLUME_UPDATED")).volume).toBe(0.35);
+
+    await evictDurableObject(stub);
+    expect((await snapshot("hibernate-room")).volume).toBe(0.35);
+    listener.close();
+  });
+
+  it("treats duplicate readiness as one listener and cancels removed pending tracks", async () => {
+    let track = await uploadTrack("pending-room", "Pending");
+    let first = await join("pending-room", "first");
+    let second = await join("pending-room", "second");
+
+    first.send({ type: "PLAY", trackId: track.id, trackTimeSeconds: 0 });
+    await first.next("LOAD_TRACK");
+    await second.next("LOAD_TRACK");
+    await first.next("TRACK_BUFFERING");
+    first.send({ type: "TRACK_READY", trackId: track.id });
+    first.send({ type: "TRACK_READY", trackId: track.id });
+    await first.next("TRACK_BUFFERING");
+    expect((await first.next("TRACK_BUFFERING")).readyClientCount).toBe(1);
+    first.expectNoMessage("SCHEDULED_PLAY");
+
+    first.send({ type: "REMOVE_TRACK", trackId: track.id });
+    expect((await first.next("QUEUE_UPDATED")).tracks).toEqual([]);
+    await runDurableObjectAlarm(env.RADIO_ROOMS.getByName("pending-room"));
+    first.expectNoMessage("SCHEDULED_PLAY");
+
+    first.close();
+    second.close();
+  });
+
+  it("renames, reorders, removes, and advances tracks through the socket protocol", async () => {
+    let firstTrack = await uploadTrack("queue-room", "First");
+    let secondTrack = await uploadTrack("queue-room", "Second");
+    let listener = await join("queue-room", "listener");
+
+    listener.send({ type: "RENAME_TRACK", trackId: firstTrack.id, title: "Renamed" });
+    expect((await listener.next("QUEUE_UPDATED")).tracks[0]!.title).toBe("Renamed");
+
+    listener.send({ type: "REORDER_TRACKS", trackIds: [secondTrack.id, firstTrack.id] });
+    expect((await listener.next("QUEUE_UPDATED")).tracks.map((track) => track.id)).toEqual([
+      secondTrack.id,
+      firstTrack.id,
+    ]);
+
+    listener.send({ type: "PLAY", trackId: secondTrack.id, trackTimeSeconds: 0 });
+    await listener.next("LOAD_TRACK");
+    listener.send({ type: "TRACK_READY", trackId: secondTrack.id });
+    await listener.next("SCHEDULED_PLAY");
+    listener.send({ type: "TRACK_ENDED", trackId: secondTrack.id, trackTimeSeconds: 12 });
+    expect((await listener.next("LOAD_TRACK")).track.id).toBe(firstTrack.id);
+
+    listener.send({ type: "REMOVE_TRACK", trackId: secondTrack.id });
+    expect((await listener.next("QUEUE_UPDATED")).tracks.map((track) => track.id)).toEqual([
+      firstTrack.id,
+    ]);
+
+    listener.close();
+  });
+});
+
+describe("Worker HTTP boundary", () => {
+  it("renders room-specific Remix pages", async () => {
+    let root = await request("/", { redirect: "manual" });
+    expect(root.status).toBe(302);
+    expect(root.headers.get("Location")).toBe("/rooms/cozy");
+
+    let page = await request("/rooms/http-room");
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("radio-room");
+  });
+
+  it("streams uploads to object storage and serves byte ranges", async () => {
+    let track = await uploadTrack("media-room", "Media");
+    let response = await request(track.url, { headers: { Range: "bytes=1-2" } });
+
+    expect(response.status).toBe(206);
+    expect(response.headers.get("Content-Range")).toBe("bytes 1-2/4");
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([2, 3]);
+
+    let suffix = await request(track.url, { headers: { Range: "bytes=-2" } });
+    expect(suffix.headers.get("Content-Range")).toBe("bytes 2-3/4");
+    expect([...new Uint8Array(await suffix.arrayBuffer())]).toEqual([3, 4]);
+  });
+
+  it("marks interrupted uploads failed without exposing partial media", async () => {
+    let metadata = await request("/api/rooms/failed-upload/tracks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "broken.mp3", mediaType: "audio/mpeg", sizeBytes: 4 }),
+    });
+    let track = (await metadata.json<{ track: Track }>()).track;
+    let content = await request(`/api/rooms/failed-upload/tracks/${track.id}/content`, {
+      method: "PUT",
+      headers: { "Content-Type": "audio/mpeg", "Content-Length": "3" },
+      body: new Uint8Array([1, 2, 3]),
+    });
+
+    expect(content.status).toBe(400);
+    expect((await snapshot("failed-upload")).tracks[0]!.upload?.status).toBe("failed");
+    expect((await request(track.url)).status).toBe(404);
+  });
+});
+
+async function uploadTrack(roomSlug: string, title: string): Promise<Track> {
+  let metadata = await request(`/api/rooms/${roomSlug}/tracks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: `${title}.mp3`, mediaType: "audio/mpeg", sizeBytes: 4 }),
+  });
+  expect(metadata.status).toBe(201);
+  let pending = (await metadata.json<{ track: Track }>()).track;
+
+  let content = await request(`/api/rooms/${roomSlug}/tracks/${pending.id}/content`, {
+    method: "PUT",
+    headers: { "Content-Type": "audio/mpeg", "Content-Length": "4" },
+    body: new Uint8Array([1, 2, 3, 4]),
+  });
+  expect(content.status).toBe(200);
+  return (await content.json<{ track: Track }>()).track;
+}
+
+async function snapshot(roomSlug: string): Promise<RoomSnapshot> {
+  let response = await env.RADIO_ROOMS.getByName(roomSlug).fetch("https://cell.test/snapshot", {
+    headers: { "x-radio-room": roomSlug },
+  });
+  expect(response.status).toBe(200);
+  return response.json<RoomSnapshot>();
+}
+
+async function join(roomSlug: string, clientId: string): Promise<SocketClient> {
+  let response = await request(`/ws/${roomSlug}`, { headers: { Upgrade: "websocket" } });
+  expect(response.status).toBe(101);
+  let socket = response.webSocket!;
+  socket.accept();
+  let client = new SocketClient(socket);
+  client.send({ type: "JOIN", clientId, name: clientId });
+  await client.next("ROOM_STATE");
+  return client;
+}
+
+class SocketClient {
+  private messages: ServerMessage[] = [];
+  private waiters: Array<() => void> = [];
+
+  constructor(private socket: WebSocket) {
+    socket.addEventListener("message", (event) => {
+      let message = parseServerMessage(String(event.data));
+      if (message) this.messages.push(message);
+      this.waiters.shift()?.();
+    });
+  }
+
+  send(message: unknown): void {
+    this.socket.send(JSON.stringify(message));
+  }
+
+  async next<T extends ServerMessage["type"]>(
+    type: T,
+  ): Promise<Extract<ServerMessage, { type: T }>> {
+    return this.waitForMessage(type, 20);
+  }
+
+  expectNoMessage(type: ServerMessage["type"]): void {
+    expect(this.messages.some((message) => message.type === type)).toBe(false);
+  }
+
+  close(): void {
+    this.socket.close(1000);
+  }
+
+  private async waitForMessage<T extends ServerMessage["type"]>(
+    type: T,
+    attemptsLeft: number,
+  ): Promise<Extract<ServerMessage, { type: T }>> {
+    let index = this.messages.findIndex((message) => message.type === type);
+    if (index >= 0) return this.messages.splice(index, 1)[0] as Extract<ServerMessage, { type: T }>;
+    if (attemptsLeft === 0) throw new Error(`Timed out waiting for ${type}`);
+    await new Promise<void>((resolve) => {
+      this.waiters.push(resolve);
+      setTimeout(resolve, 50);
+    });
+    return this.waitForMessage(type, attemptsLeft - 1);
+  }
+}
+
+function request(pathname: string, init?: RequestInit): Promise<Response> {
+  return exports.default.fetch(new Request(origin + pathname, init));
+}

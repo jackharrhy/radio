@@ -76,6 +76,7 @@ export class RadioClient extends EventTarget {
   constructor(
     private readonly options: {
       initialSnapshot: RoomSnapshot;
+      roomSlug?: string;
       clientId: string;
       name: string;
       audioManager?: RadioAudioManager;
@@ -135,7 +136,9 @@ export class RadioClient extends EventTarget {
   connect(): void {
     if (this.disposed) return;
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return;
-    this.socket = new WebSocket(getWsUrl());
+    this.socket = new WebSocket(
+      getWsUrl(this.options.roomSlug ?? this.options.initialSnapshot.roomId),
+    );
     this.socket.addEventListener("open", () => {
       this.setState({ connected: true, status: "Connected" });
       this.send({ type: "JOIN", clientId: this.options.clientId, name: this.options.name });
@@ -247,7 +250,8 @@ export class RadioClient extends EventTarget {
     let trackId: string | null = null;
 
     try {
-      let response = await fetch(getTrackCreateUrl(), {
+      let roomSlug = this.options.roomSlug ?? this.options.initialSnapshot.roomId;
+      let response = await fetch(getTrackCreateUrl(roomSlug), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -269,7 +273,7 @@ export class RadioClient extends EventTarget {
       trackId = pendingTrack.id;
       this.mergeTrack(pendingTrack);
       let completedTrack = await this.uploadContent({
-        url: getTrackContentUrl(pendingTrack.id),
+        url: getTrackContentUrl(roomSlug, pendingTrack.id),
         file,
         signal: controller.signal,
         onProgress: ({ bytesSent }) => this.updateUploadProgress(pendingTrack.id, bytesSent),

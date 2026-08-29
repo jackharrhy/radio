@@ -2,7 +2,8 @@ import * as assert from "remix/assert";
 import { it } from "remix/test";
 import type { Handle } from "remix/ui";
 
-import { ROOM_ID, type RoomSnapshot } from "../data/protocol.ts";
+import type { RoomSnapshot } from "../data/protocol.ts";
+import { DEFAULT_ROOM_SLUG } from "../data/room-id.ts";
 import { RadioRoom } from "./radio-room.tsx";
 
 class FakeWebSocket extends EventTarget {
@@ -69,7 +70,7 @@ class FakeMediaElement extends EventTarget {
 
 function snapshot(): RoomSnapshot {
   return {
-    roomId: ROOM_ID,
+    roomId: DEFAULT_ROOM_SLUG,
     tracks: [],
     clients: [],
     playback: { type: "paused", trackId: null, trackTimeSeconds: 0, serverTimeToExecute: 0 },

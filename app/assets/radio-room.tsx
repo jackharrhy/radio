@@ -5,11 +5,12 @@ import { RadioClient, type RadioClientState } from "./radio-client.ts";
 import { RadioGateView, RadioPlayerView } from "./radio-room-components.tsx";
 
 interface RadioRoomProps extends SerializableProps {
+  roomSlug?: string;
   initialSnapshot: RoomSnapshot;
 }
 
 export const RadioRoom = clientEntry(
-  import.meta.url,
+  "radio-room",
   function RadioRoom(handle: Handle<RadioRoomProps>) {
     let initialSnapshot = handle.props.initialSnapshot;
     let client: RadioClient | null = null;
@@ -42,7 +43,12 @@ export const RadioRoom = clientEntry(
       if (!name) return;
       localStorage.setItem("radio.name", name);
       let clientId = getOrCreateClientId();
-      client = new RadioClient({ initialSnapshot, clientId, name });
+      client = new RadioClient({
+        roomSlug: handle.props.roomSlug ?? initialSnapshot.roomId,
+        initialSnapshot,
+        clientId,
+        name,
+      });
       client.onState((nextState) => {
         state = nextState;
         handle.update();
