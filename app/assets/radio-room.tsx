@@ -10,7 +10,7 @@ interface RadioRoomProps extends SerializableProps {
 }
 
 export const RadioRoom = clientEntry(
-  "radio-room",
+  "radio-room#RadioRoom",
   function RadioRoom(handle: Handle<RadioRoomProps>) {
     let initialSnapshot = handle.props.initialSnapshot;
     let client: RadioClient | null = null;
