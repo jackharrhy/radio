@@ -2,6 +2,9 @@
 .git
 .github
 .upstream
+.celld
+.wrangler
+dist
 node_modules
 public/fonts/*.woff2
 public/uploads
