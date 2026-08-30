@@ -129,13 +129,13 @@ it("keeps a connecting WebSocket alive across the initial component update", () 
     let componentController = new AbortController();
     let queuedTask: ((signal: AbortSignal) => void) | undefined;
     let handle = {
-      props: { initialSnapshot: snapshot() },
+      props: { initialSnapshot: snapshot(), roomName: "cozy" },
       signal: componentController.signal,
       queueTask(task: (signal: AbortSignal) => void) {
         queuedTask = task;
       },
       update: async () => new AbortController().signal,
-    } as unknown as Handle<{ initialSnapshot: RoomSnapshot }>;
+    } as unknown as Handle<{ initialSnapshot: RoomSnapshot; roomName: string }>;
 
     RadioRoom(handle);
     if (!queuedTask) throw new Error("RadioRoom did not queue its initial task");

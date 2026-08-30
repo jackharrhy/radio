@@ -188,7 +188,9 @@ describe("Worker HTTP boundary", () => {
     expect(created.headers.get("Location")).toBe("/rooms/late-night");
 
     let lobby = await request("/");
-    expect(await lobby.text()).toContain("Late Night");
+    let lobbyHtml = await lobby.text();
+    expect(lobbyHtml).toContain("late night");
+    expect(lobbyHtml).not.toContain("Late Night");
   });
 
   it("rejects unsafe cross-origin form submissions", async () => {
@@ -203,7 +205,9 @@ describe("Worker HTTP boundary", () => {
   it("renders room-specific Remix pages", async () => {
     let root = await request("/", { redirect: "manual" });
     expect(root.status).toBe(200);
-    expect(await root.text()).toContain("available rooms");
+    let rootHtml = await root.text();
+    expect(rootHtml).toContain("available rooms");
+    expect(rootHtml).toContain('aria-label="Breadcrumb"');
 
     await ensureRoom("http-room", "HTTP room");
     let page = await authorizedRequest("/rooms/http-room");
@@ -213,6 +217,7 @@ describe("Worker HTTP boundary", () => {
     expect(html).toMatch(/\/assets\/entry-[A-Z0-9]+\.js/);
     expect(html).toMatch(/\/assets\/radio-room-[A-Z0-9]+\.js/);
     expect(html).toContain('"exportName":"RadioRoom"');
+    expect(html).toContain("http room");
     expect(html).not.toContain('"exportName":"RadioRoom2"');
   });
 

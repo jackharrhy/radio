@@ -10,7 +10,6 @@ import { desktopColor } from "../ui/desktop/theme.ts";
 
 export const radioStyle = {
   window: desktopStyle.window,
-  titleBar: desktopStyle.titleBar,
   panel: desktopStyle.panel,
   messageCard: desktopStyle.messageCard,
   messageHeader: desktopStyle.messageLabel,
@@ -29,58 +28,6 @@ export const radioStyle = {
   }),
   pageShell: css({ height: "90vh" }),
   previewShell: css({ height: "600px" }),
-  topBar: css({ justifyContent: "flex-end" }),
-  roomLink: css({ color: "#fff", marginRight: "auto" }),
-  statusPill: css({
-    width: "12px",
-    flex: "0 0 12px",
-    height: "100%",
-    marginLeft: "auto",
-    display: "flex",
-    alignItems: "center",
-    position: "relative",
-    fontSize: "12px",
-    "&::before": {
-      content: '""',
-      boxSizing: "border-box",
-      flex: "0 0 12px",
-      width: "12px",
-      height: "12px",
-      border: "1px solid rgba(31, 42, 49, 0.72)",
-      borderRadius: "50%",
-      boxShadow: "0 1px rgba(255, 255, 255, 0.5) inset, 0 1px 2px rgba(0, 0, 0, 0.35)",
-    },
-    '&[data-tone="offline"]::before': {
-      background: "radial-gradient(circle at 35% 30%, #ffd2cc, #d9574f 55%, #8f2722)",
-    },
-    '&[data-tone="syncing"]::before': {
-      background: "radial-gradient(circle at 35% 30%, #fff2bd, #d9ad35 55%, #8f6818)",
-    },
-    '&[data-tone="online"]::before': {
-      background: "radial-gradient(circle at 35% 30%, #d5f6dc, #43a85b 55%, #236b34)",
-    },
-    "& > span": {
-      position: "absolute",
-      top: "50%",
-      right: "20px",
-      opacity: 0,
-      transform: "translate(4px, -50%)",
-      transition: "opacity 120ms ease, transform 120ms ease",
-      whiteSpace: "nowrap",
-      pointerEvents: "none",
-      display: "flex",
-      alignItems: "center",
-    },
-    "& > span > i": {
-      padding: "0 4px",
-      opacity: 0.42,
-      fontStyle: "normal",
-    },
-    "&:hover > span": {
-      opacity: 1,
-      transform: "translate(0, -50%)",
-    },
-  }),
   nowPlaying: css({
     margin: "6px",
     display: "grid",

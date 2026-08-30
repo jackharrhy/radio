@@ -2,7 +2,7 @@ import { createController } from "remix/router";
 import { redirect } from "remix/response/redirect";
 import { Session } from "remix/session";
 
-import { normalizeRoomSlug } from "../../data/room-id.ts";
+import { normalizeRoomName, normalizeRoomSlug } from "../../data/room-id.ts";
 import {
   CurrentRoom,
   RadioRuntime,
@@ -19,7 +19,7 @@ export default createController(routes.rooms, {
       middleware: [requirePageAccess()],
       async handler(context) {
         let form = context.get(FormData);
-        let name = String(form.get("name") ?? "").trim();
+        let name = normalizeRoomName(String(form.get("name") ?? ""));
         let slug = normalizeRoomSlug(String(form.get("slug") ?? ""));
         if (!slug || !name || name.length > 48) {
           context.get(Session)!.flash("message", "Use a room name and a lowercase address.");
@@ -41,7 +41,7 @@ export default createController(routes.rooms, {
           await context.get(RadioRuntime)!.fetchRoom(room.slug, "/snapshot"),
         );
         if (!snapshot) return new Response("Room unavailable", { status: 503 });
-        return context.render(<RadioPage snapshot={snapshot} />);
+        return context.render(<RadioPage snapshot={snapshot} roomName={room.name} />);
       },
     },
   },

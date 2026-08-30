@@ -61,11 +61,15 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
       state,
       client,
       preview: true,
+      roomName: "cozy",
       viewportWidth: 960,
     }),
   );
 
   try {
+    let breadcrumbs = result.$('nav[aria-label="Breadcrumb"]')!;
+    assert.equal(breadcrumbs.querySelector("a")?.getAttribute("href"), "/");
+    assert.equal(breadcrumbs.querySelector('[aria-current="page"]')?.textContent, "cozy");
     assert.equal(result.$('button[aria-label="Play"]')?.getAttribute("title"), "Play");
     assert.equal(result.$('button[aria-label="Wake audio"]')?.getAttribute("title"), "Wake audio");
     assert.equal(

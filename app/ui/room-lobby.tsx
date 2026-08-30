@@ -6,6 +6,7 @@ import type { RadioIdentity } from "../middleware/access.ts";
 import { routes } from "../routes.ts";
 import { desktopColor } from "./desktop/theme.ts";
 import { desktopStyle } from "./desktop/styles.ts";
+import { RadioHeader } from "./radio-header.tsx";
 
 export function RoomLobby(
   handle: Handle<{
@@ -19,7 +20,7 @@ export function RoomLobby(
     let { rooms, identity, selectedRoom, message } = handle.props;
     return (
       <section mix={[desktopStyle.window, roomLobbyStyle.window]}>
-        <div mix={desktopStyle.titleBar} aria-hidden="true"></div>
+        <RadioHeader />
 
         <div mix={roomLobbyStyle.body}>
           {message ? (
@@ -94,14 +95,21 @@ export function RoomLobby(
               >
                 <label mix={roomLobbyStyle.field}>
                   <span>room name</span>
-                  <input mix={desktopStyle.input} name="name" maxlength={48} required={true} />
+                  <input
+                    mix={[desktopStyle.input, roomLobbyStyle.lowercaseInput]}
+                    name="name"
+                    autocapitalize="none"
+                    maxlength={48}
+                    required={true}
+                  />
                 </label>
                 <label mix={roomLobbyStyle.field}>
                   <span>address</span>
                   <input
-                    mix={desktopStyle.input}
+                    mix={[desktopStyle.input, roomLobbyStyle.lowercaseInput]}
                     name="slug"
                     placeholder="late-night"
+                    autocapitalize="none"
                     pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
                     maxlength={40}
                     required={true}
@@ -209,5 +217,6 @@ const roomLobbyStyle = {
     gap: "10px",
     "@media (max-width: 620px)": { gridTemplateColumns: "1fr" },
   }),
+  lowercaseInput: css({ textTransform: "lowercase" }),
   signOutForm: css({ justifySelf: "end" }),
 };

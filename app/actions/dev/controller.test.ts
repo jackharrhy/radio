@@ -29,10 +29,14 @@ it("renders the development kitchen sink with representative radio states", asyn
   assert.match(html, /<title>Radio \/ UI<\/title>/);
   assert.match(html, /signed out \/ validation/);
   assert.match(html, /available rooms/);
+  assert.match(html, /aria-label="Breadcrumb"/);
+  assert.match(html, /aria-current="page"[^>]*>rooms/);
   assert.match(html, /start a room/);
   assert.match(html, /TrackListPreview/);
   assert.match(html, /paused \/ 20ms earlier/);
   assert.match(html, /loading \/ syncing/);
   assert.match(html, /playing \/ dense/);
+  assert.match(html, /Naked Flames - Undisputed Altitude/);
+  assert.match(html, />Yves</);
   assert.match(html, /name="robots" content="noindex, nofollow"/);
 });

@@ -47,10 +47,75 @@ const clients: ClientInfo[] = [
   client("client-4", "Sam with a long name", 127),
 ];
 
+const denseTrackTitles = [
+  "Boards of Canada - Roygbiv",
+  "Daft Punk - Voyager",
+  "Naked Flames - Pan Matsuri",
+  "Boards of Canada - Dayvan Cowboy",
+  "Naked Flames - Carrot Car",
+  "Daft Punk - Veridis Quo",
+  "Boards of Canada - Music Is Math",
+  "Naked Flames - Tennessee Transit",
+  "Daft Punk - Something About Us",
+  "Boards of Canada - Telephasic Workshop",
+  "Naked Flames - Visiting Corners",
+  "Daft Punk - Revolution 909",
+  "Boards of Canada - Sunshine Recorder",
+  "Naked Flames - Under Every Tree in England",
+  "Daft Punk - Fresh",
+  "Boards of Canada - Turquoise Hexagon Sun",
+  "Naked Flames - 247 365",
+  "Daft Punk - Motherboard",
+  "Boards of Canada - Peacock Tail",
+  "Naked Flames - Waterslug2",
+  "Daft Punk - Contact",
+  "Boards of Canada - Chromakey Dreamcoat",
+  "Naked Flames - Undisputed Altitude",
+  "Daft Punk - Face to Face",
+] as const;
+
+const denseTracks: Track[] = denseTrackTitles.map((title, index) => ({
+  id: `dense-track-${index + 1}`,
+  title,
+  url: `/dev/dense-track-${index + 1}.mp3`,
+  addedAt: index + 1,
+}));
+
+const denseClientSeeds = [
+  ["Jack", 1],
+  ["Mira", 8],
+  ["Seok", 12],
+  ["Paloma", 18],
+  ["Imani", 23],
+  ["Theo", 31],
+  ["Noemi", 42],
+  ["Basil", 55],
+  ["Nia", 67],
+  ["Otis", 74],
+  ["Cy", 89],
+  ["Priya", 104],
+  ["Kenji", 127],
+  ["Esme", 145],
+  ["Sora", 163],
+  ["Jules", 186],
+  ["Safiya", 0],
+  ["Nico", 11],
+  ["Min", 29],
+  ["Rowan", 48],
+  ["Farah", 77],
+  ["Dario", 96],
+  ["Leila", 132],
+  ["Yves", 211],
+] as const;
+
+const denseClients: ClientInfo[] = denseClientSeeds.map(([name, rtt], index) =>
+  client(`dense-client-${index + 1}`, name, rtt),
+);
+
 const rooms: RoomRecord[] = [
-  { slug: "cozy", name: "Cozy", createdAt: 1 },
-  { slug: "kitchen", name: "Kitchen", createdAt: 2 },
-  { slug: "late-night", name: "Late night", createdAt: 3 },
+  { slug: "cozy", name: "cozy", createdAt: 1 },
+  { slug: "kitchen", name: "kitchen", createdAt: 2 },
+  { slug: "late-night", name: "late night", createdAt: 3 },
 ];
 
 const colorTokens = [
@@ -313,9 +378,9 @@ export function KitchenSinkPage() {
               <PlayerSpecimen
                 label="playing / dense"
                 state={state({
-                  tracks,
-                  clients,
-                  currentTrackId: "track-4",
+                  tracks: denseTracks,
+                  clients: denseClients,
+                  currentTrackId: "dense-track-17",
                   connected: true,
                   synced: true,
                   rttMs: 127,
@@ -378,6 +443,7 @@ function PlayerSpecimen(handle: Handle<{ label: string; state: RadioClientState 
         state={handle.props.state}
         client={null}
         preview={true}
+        roomName="cozy"
         viewportWidth={960}
       />
     </Specimen>

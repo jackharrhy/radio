@@ -6,6 +6,7 @@ import { RadioPlayerView, TrackList } from "./radio-room-components.tsx";
 
 interface RadioRoomProps extends SerializableProps {
   initialSnapshot: RoomSnapshot;
+  roomName: string;
 }
 
 export const RadioRoom = clientEntry(
@@ -77,6 +78,7 @@ export const RadioRoom = clientEntry(
         <RadioPlayerView
           state={state}
           client={client}
+          roomName={handle.props.roomName}
           viewportWidth={viewportWidth}
           onTrackInput={(node, signal) => {
             trackInput = node;

@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { normalizeRoomSlug } from "./room-id.ts";
+import { normalizeRoomName, normalizeRoomSlug } from "./room-id.ts";
 import type { RoomRecord } from "./radio-runtime.ts";
 
 type RoomRow = {
@@ -19,8 +19,17 @@ export class RoomDirectoryCell extends DurableObject<Env> {
           name TEXT NOT NULL,
           created_at INTEGER NOT NULL
         );
-        INSERT OR IGNORE INTO rooms VALUES ('cozy', 'Cozy', 0);
+        INSERT OR IGNORE INTO rooms VALUES ('cozy', 'cozy', 0);
       `);
+      let rooms = ctx.storage.sql.exec<Pick<RoomRow, "slug" | "name">>(
+        "SELECT slug, name FROM rooms",
+      );
+      for (let room of rooms) {
+        let name = normalizeRoomName(room.name);
+        if (name !== room.name) {
+          ctx.storage.sql.exec("UPDATE rooms SET name = ? WHERE slug = ?", name, room.slug);
+        }
+      }
     });
   }
 
@@ -69,7 +78,7 @@ export class RoomDirectoryCell extends DurableObject<Env> {
   private async createRoom(request: Request, slug: string): Promise<Response> {
     let input = (await request.json().catch(() => null)) as { name?: unknown } | null;
     if (typeof input?.name !== "string") return new Response("Invalid room", { status: 400 });
-    let name = input.name.trim();
+    let name = normalizeRoomName(input.name);
     if (!name || name.length > 48) return new Response("Invalid room", { status: 400 });
     if (this.hasRoom(slug)) return new Response("Room already exists", { status: 409 });
     let createdAt = Date.now();
@@ -84,5 +93,5 @@ export class RoomDirectoryCell extends DurableObject<Env> {
 }
 
 function toRoomRecord(row: RoomRow): RoomRecord {
-  return { slug: row.slug, name: row.name, createdAt: row.created_at };
+  return { slug: row.slug, name: normalizeRoomName(row.name), createdAt: row.created_at };
 }

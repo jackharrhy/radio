@@ -2,6 +2,7 @@ import { on, ref, type Handle } from "remix/ui";
 import * as menu from "remix/ui/menu/primitives";
 
 import type { Track } from "../data/protocol.ts";
+import { RadioHeader, RadioStatus } from "../ui/radio-header.tsx";
 import {
   fitFontSize,
   fitText,
@@ -18,6 +19,7 @@ export function RadioPlayerView(
     state: RadioClientState;
     client: RadioClient | null;
     preview?: boolean;
+    roomName?: string;
     viewportWidth: number;
     onTrackInput?: (node: HTMLInputElement, signal: AbortSignal) => void;
     onUploadSelected?: (input: HTMLInputElement) => void;
@@ -75,12 +77,7 @@ export function RadioPlayerView(
           preview ? radioStyle.previewShell : radioStyle.pageShell,
         ]}
       >
-        <header mix={[radioStyle.titleBar, radioStyle.topBar]}>
-          <a href="/" mix={radioStyle.roomLink}>
-            rooms
-          </a>
-          <StatusPill state={state} />
-        </header>
+        <RadioHeader roomName={handle.props.roomName} status={<StatusPill state={state} />} />
 
         <section
           mix={[radioStyle.panel, radioStyle.nowPlaying]}
@@ -689,22 +686,24 @@ export function StatusPill(handle: Handle<{ state: RadioClientState }>) {
     let details = state.connected
       ? `${connection} / ${synchronization} / ${latency} / ${quality}`
       : `${connection} / ${synchronization}`;
-    let tone = !state.connected ? "offline" : state.synced ? "online" : "syncing";
+    let tone: "offline" | "online" | "syncing" = !state.connected
+      ? "offline"
+      : state.synced
+        ? "online"
+        : "syncing";
 
     return (
-      <output aria-label={details} data-tone={tone} mix={radioStyle.statusPill}>
-        <span aria-hidden="true">
-          <span>{connection}</span>
-          <i>/</i>
-          <span>{synchronization}</span>
-          {state.connected ? (
-            <>
-              <i>/</i>
-              <span>{latency}</span>
-            </>
-          ) : null}
-        </span>
-      </output>
+      <RadioStatus label={details} tone={tone}>
+        <span>{connection}</span>
+        <i>/</i>
+        <span>{synchronization}</span>
+        {state.connected ? (
+          <>
+            <i>/</i>
+            <span>{latency}</span>
+          </>
+        ) : null}
+      </RadioStatus>
     );
   };
 }

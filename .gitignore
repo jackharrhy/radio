@@ -7,5 +7,7 @@ dist/
 !.dev.vars.example
 db/*.sqlite
 public/fonts/*.woff2
+public/uploads/
+tmp/
 .upstream/
 .DS_Store
