@@ -55,6 +55,16 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
 - Keep radio layout and radio-only selectors with the hydrated radio feature.
 - Prefer native semantic elements plus Remix `mix` behavior over wrapper components that only pass props through.
 
+## Visual Reference
+
+- Use [spiritov/ds.css](https://github.com/spiritov/ds.css) and the Nintendo DS PictoChat UI as
+  reference points when designing net-new components.
+- Treat them as inspiration, not a package dependency or a pixel-perfect specification. Radio is a
+  cleaner, higher-resolution interpretation that should still feel compact, tactile, and familiar.
+- Translate PictoChat cues through the existing local tokens and primitives: pale neutral surfaces,
+  restrained cyan accents, fine horizontal texture, crisp borders, small stepped corners, and clear
+  pressed and focus states. Preserve accessibility and consistency with existing Radio components.
+
 ## State And Deployment Boundaries
 
 - `.celld/dev/` contains ignored local cell and object state.

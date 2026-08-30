@@ -27,6 +27,11 @@ it("renders the development kitchen sink with representative radio states", asyn
 
   assert.equal(response.status, 200);
   assert.match(html, /<title>Radio \/ UI<\/title>/);
+  assert.match(html, /signed out \/ validation/);
+  assert.match(html, /available rooms/);
+  assert.match(html, /start a room/);
+  assert.match(html, /TrackListPreview/);
+  assert.match(html, /paused \/ 20ms earlier/);
   assert.match(html, /loading \/ syncing/);
   assert.match(html, /playing \/ dense/);
   assert.match(html, /name="robots" content="noindex, nofollow"/);

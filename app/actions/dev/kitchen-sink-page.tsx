@@ -1,12 +1,15 @@
 import { css, type Handle, type RemixNode } from "remix/ui";
 
-import { RadioPlayerView, StatusPill, TrackList } from "../../assets/radio-room-components.tsx";
+import { RadioPlayerView, StatusPill } from "../../assets/radio-room-components.tsx";
 import { radioStyle } from "../../assets/radio-room-styles.ts";
 import { DEFAULT_SYNC_DIAGNOSTICS, type RadioClientState } from "../../assets/radio-client.ts";
+import { TrackListPreview } from "../../assets/radio-room.tsx";
 import type { ClientInfo, Track } from "../../data/protocol.ts";
+import type { RoomRecord } from "../../data/radio-runtime.ts";
 import { desktopControlStyle, desktopIconStyle, desktopStyle } from "../../ui/desktop/styles.ts";
 import { desktopColor, desktopThemeStyle } from "../../ui/desktop/theme.ts";
 import { Document } from "../../ui/document.tsx";
+import { RoomLobby } from "../../ui/room-lobby.tsx";
 
 const tracks: Track[] = [
   { id: "track-1", title: "Bickle - Naked", url: "/dev/track-1.mp3", addedAt: 1 },
@@ -44,6 +47,12 @@ const clients: ClientInfo[] = [
   client("client-4", "Sam with a long name", 127),
 ];
 
+const rooms: RoomRecord[] = [
+  { slug: "cozy", name: "Cozy", createdAt: 1 },
+  { slug: "kitchen", name: "Kitchen", createdAt: 2 },
+  { slug: "late-night", name: "Late night", createdAt: 3 },
+];
+
 const colorTokens = [
   ["ink", desktopColor.ink],
   ["line", desktopColor.line],
@@ -69,6 +78,7 @@ export function KitchenSinkPage() {
         <header mix={sinkStyle.toolbar}>
           <strong>radio/ui</strong>
           <nav aria-label="Kitchen sink sections" mix={sinkStyle.nav}>
+            <a href="#home">home</a>
             <a href="#tokens">tokens</a>
             <a href="#controls">controls</a>
             <a href="#status">status</a>
@@ -81,6 +91,26 @@ export function KitchenSinkPage() {
         </header>
 
         <div mix={sinkStyle.stack}>
+          <SinkSection id="home" title="home">
+            <div mix={sinkStyle.homeStack}>
+              <Specimen label="signed out / validation">
+                <RoomLobby
+                  rooms={rooms}
+                  identity={null}
+                  selectedRoom="cozy"
+                  message="Choose a room and enter a name."
+                />
+              </Specimen>
+              <Specimen label="signed in">
+                <RoomLobby
+                  rooms={rooms}
+                  identity={{ name: "Jack", authenticatedAt: 1 }}
+                  selectedRoom="kitchen"
+                />
+              </Specimen>
+            </div>
+          </SinkSection>
+
           <SinkSection id="tokens" title="tokens">
             <div mix={sinkStyle.tokenGrid}>
               {colorTokens.map(([name, color]) => (
@@ -265,6 +295,22 @@ export function KitchenSinkPage() {
                 })}
               />
               <PlayerSpecimen
+                label="paused / 20ms earlier"
+                state={state({
+                  tracks,
+                  clients: clients.slice(0, 2),
+                  currentTrackId: "track-3",
+                  connected: true,
+                  synced: true,
+                  rttMs: 18,
+                  deviceCompensationMs: 20,
+                  durationSeconds: 368,
+                  positionSeconds: 143,
+                  volume: 0.54,
+                  status: "Paused",
+                })}
+              />
+              <PlayerSpecimen
                 label="playing / dense"
                 state={state({
                   tracks,
@@ -339,18 +385,26 @@ function PlayerSpecimen(handle: Handle<{ label: string; state: RadioClientState 
 }
 
 function QueueSpecimen(handle: Handle<{ label: string; state: RadioClientState }>) {
-  return () => (
-    <Specimen label={handle.props.label}>
-      <section mix={[radioStyle.panel, radioStyle.queuePanel, sinkStyle.queuePreview]}>
-        <div mix={radioStyle.sectionHeader}>
-          <h2>playlist</h2>
-        </div>
-        <div mix={radioStyle.queueScroll}>
-          <TrackList state={handle.props.state} client={null} surface={780} />
-        </div>
-      </section>
-    </Specimen>
-  );
+  return () => {
+    let previewState = {
+      ...handle.props.state,
+      syncUncertaintyMs: Number.isFinite(handle.props.state.syncUncertaintyMs)
+        ? handle.props.state.syncUncertaintyMs
+        : 0,
+    };
+    return (
+      <Specimen label={handle.props.label}>
+        <section mix={[radioStyle.panel, radioStyle.queuePanel, sinkStyle.queuePreview]}>
+          <div mix={radioStyle.sectionHeader}>
+            <h2>playlist</h2>
+          </div>
+          <div mix={radioStyle.queueScroll}>
+            <TrackListPreview stateJson={JSON.stringify(previewState)} surface={780} />
+          </div>
+        </section>
+      </Specimen>
+    );
+  };
 }
 
 function state(overrides: Partial<RadioClientState> = {}): RadioClientState {
@@ -526,6 +580,11 @@ const sinkStyle = {
     "@media (max-width: 520px)": { gridTemplateColumns: "1fr" },
   }),
   bufferingGrid: css({ display: "grid", gap: "12px" }),
+  homeStack: css({
+    display: "grid",
+    gap: "18px",
+    "& article > div": { display: "grid", justifyItems: "center" },
+  }),
   queuePreview: css({ minHeight: 0 }),
   playerStack: css({ display: "grid", gap: "18px" }),
 } as const;

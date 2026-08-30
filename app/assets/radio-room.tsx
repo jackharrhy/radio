@@ -2,7 +2,7 @@ import { addEventListeners, clientEntry, type Handle, type SerializableProps } f
 
 import type { RoomSnapshot } from "../data/protocol.ts";
 import { DEFAULT_SYNC_DIAGNOSTICS, RadioClient, type RadioClientState } from "./radio-client.ts";
-import { RadioPlayerView } from "./radio-room-components.tsx";
+import { RadioPlayerView, TrackList } from "./radio-room-components.tsx";
 
 interface RadioRoomProps extends SerializableProps {
   initialSnapshot: RoomSnapshot;
@@ -89,6 +89,51 @@ export const RadioRoom = clientEntry(
         />
       );
     };
+  },
+);
+
+interface TrackListPreviewProps extends SerializableProps {
+  stateJson: string;
+  surface: number;
+}
+
+export const TrackListPreview = clientEntry(
+  "radio-room#TrackListPreview",
+  function TrackListPreviewComponent(handle: Handle<TrackListPreviewProps>) {
+    let state = JSON.parse(handle.props.stateJson) as RadioClientState;
+    let client = {
+      play(trackId: string) {
+        state = { ...state, currentTrackId: trackId, playing: true };
+        handle.update();
+      },
+      removeTrack(trackId: string) {
+        state = {
+          ...state,
+          tracks: state.tracks.filter((track) => track.id !== trackId),
+          currentTrackId: state.currentTrackId === trackId ? null : state.currentTrackId,
+        };
+        handle.update();
+      },
+      renameTrack(trackId: string, title: string) {
+        state = {
+          ...state,
+          tracks: state.tracks.map((track) => (track.id === trackId ? { ...track, title } : track)),
+        };
+        handle.update();
+      },
+      reorderTracks(trackIds: string[]) {
+        let tracksById = new Map(state.tracks.map((track) => [track.id, track]));
+        let tracks = trackIds.flatMap((trackId) => {
+          let track = tracksById.get(trackId);
+          return track ? [track] : [];
+        });
+        if (tracks.length !== state.tracks.length) return;
+        state = { ...state, tracks };
+        handle.update();
+      },
+    } as RadioClient;
+
+    return () => <TrackList state={state} client={client} surface={handle.props.surface} />;
   },
 );
 

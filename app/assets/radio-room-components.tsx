@@ -1,4 +1,5 @@
 import { on, ref, type Handle } from "remix/ui";
+import * as menu from "remix/ui/menu/primitives";
 
 import type { Track } from "../data/protocol.ts";
 import {
@@ -338,6 +339,29 @@ export function FittedTitle(
   };
 }
 
+function getDropPosition(event: DragEvent & { currentTarget: HTMLElement }): "before" | "after" {
+  let bounds = event.currentTarget.getBoundingClientRect();
+  return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+}
+
+function getDropOrder(
+  trackIds: string[],
+  sourceId: string,
+  targetId: string,
+  position: "before" | "after",
+): string[] {
+  if (sourceId === targetId) return trackIds;
+  let nextOrder = trackIds.filter((trackId) => trackId !== sourceId);
+  let targetIndex = nextOrder.indexOf(targetId);
+  if (targetIndex === -1 || !trackIds.includes(sourceId)) return trackIds;
+  nextOrder.splice(targetIndex + (position === "after" ? 1 : 0), 0, sourceId);
+  return nextOrder;
+}
+
+function ordersMatch(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((trackId, index) => trackId === right[index]);
+}
+
 export function TrackList(
   handle: Handle<{
     state: RadioClientState;
@@ -348,8 +372,8 @@ export function TrackList(
   let editingTrackId: string | null = null;
   let draftTitle = "";
   let draggingTrackId: string | null = null;
-  let dragOrder: string[] | null = null;
   let dropTargetId: string | null = null;
+  let dropPosition: "before" | "after" | null = null;
 
   function beginRename(track: Track): void {
     if (track.upload) return;
@@ -375,47 +399,71 @@ export function TrackList(
     handle.update();
   }
 
-  function getOrderedTracks(tracks: Track[]): Track[] {
-    if (!dragOrder) return tracks;
-    let byId = new Map(tracks.map((track) => [track.id, track]));
-    let ordered = dragOrder.flatMap((trackId) => {
-      let track = byId.get(trackId);
-      return track ? [track] : [];
-    });
-    let orderedIds = new Set(ordered.map((track) => track.id));
-    return [...ordered, ...tracks.filter((track) => !orderedIds.has(track.id))];
+  function getQueueNextOrder(trackId: string): string[] {
+    let trackIds = handle.props.state.tracks.map((track) => track.id);
+    if (!trackIds.includes(trackId) || trackId === handle.props.state.currentTrackId) {
+      return trackIds;
+    }
+
+    let nextOrder = trackIds.filter((candidateId) => candidateId !== trackId);
+    let currentIndex = handle.props.state.currentTrackId
+      ? nextOrder.indexOf(handle.props.state.currentTrackId)
+      : -1;
+    nextOrder.splice(currentIndex + 1, 0, trackId);
+    return nextOrder;
+  }
+
+  function canQueueNext(track: Track): boolean {
+    if (track.upload) return false;
+    let currentOrder = handle.props.state.tracks.map((candidate) => candidate.id);
+    return !ordersMatch(currentOrder, getQueueNextOrder(track.id));
+  }
+
+  function queueNext(track: Track): void {
+    let nextOrder = getQueueNextOrder(track.id);
+    let currentOrder = handle.props.state.tracks.map((candidate) => candidate.id);
+    if (!ordersMatch(currentOrder, nextOrder)) handle.props.client?.reorderTracks(nextOrder);
   }
 
   function stageDropTarget(track: Track, event: DragEvent & { currentTarget: HTMLElement }): void {
-    if (!draggingTrackId || draggingTrackId === track.id) return;
+    if (!draggingTrackId) return;
     event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
 
-    let tracks = getOrderedTracks(handle.props.state.tracks);
-    let nextOrder = tracks.map((candidate) => candidate.id);
-    let sourceIndex = nextOrder.indexOf(draggingTrackId);
-    if (sourceIndex === -1) return;
-    nextOrder.splice(sourceIndex, 1);
+    if (draggingTrackId === track.id) {
+      if (dropTargetId === null) return;
+      dropTargetId = null;
+      dropPosition = null;
+      handle.update();
+      return;
+    }
 
-    let targetIndex = nextOrder.indexOf(track.id);
-    if (targetIndex === -1) return;
-    let bounds = event.currentTarget.getBoundingClientRect();
-    if (event.clientY >= bounds.top + bounds.height / 2) targetIndex++;
-    nextOrder.splice(targetIndex, 0, draggingTrackId);
-
-    let orderChanged =
-      !dragOrder || nextOrder.some((trackId, index) => dragOrder?.[index] !== trackId);
-    if (!orderChanged && dropTargetId === track.id) return;
-    dragOrder = nextOrder;
+    let nextPosition = getDropPosition(event);
+    if (dropTargetId === track.id && dropPosition === nextPosition) return;
     dropTargetId = track.id;
+    dropPosition = nextPosition;
     handle.update();
   }
 
-  function finishDrag(commit: boolean): void {
-    let nextOrder = dragOrder;
+  function finishDrag(): void {
+    if (!draggingTrackId && !dropTargetId && !dropPosition) return;
     draggingTrackId = null;
-    dragOrder = null;
     dropTargetId = null;
-    if (commit && nextOrder) handle.props.client?.reorderTracks(nextOrder);
+    dropPosition = null;
+    handle.update();
+  }
+
+  function commitDrop(track: Track, event: DragEvent & { currentTarget: HTMLElement }): void {
+    if (!draggingTrackId) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+
+    let currentOrder = handle.props.state.tracks.map((candidate) => candidate.id);
+    let nextOrder = getDropOrder(currentOrder, draggingTrackId, track.id, getDropPosition(event));
+    draggingTrackId = null;
+    dropTargetId = null;
+    dropPosition = null;
+    if (!ordersMatch(currentOrder, nextOrder)) handle.props.client?.reorderTracks(nextOrder);
     handle.update();
   }
 
@@ -442,11 +490,9 @@ export function TrackList(
       return null;
     }
 
-    let orderedTracks = getOrderedTracks(state.tracks);
-
     return (
       <ol mix={radioStyle.queueList}>
-        {orderedTracks.map((track, index) => {
+        {state.tracks.map((track, index) => {
           let active = track.id === state.currentTrackId;
           let uploadPercent = track.upload
             ? Math.round((track.upload.bytesReceived / track.upload.sizeBytes) * 100)
@@ -467,13 +513,10 @@ export function TrackList(
                 radioStyle.queueItem,
                 active ? radioStyle.activeQueueItem : null,
                 on("dragover", (event) => stageDropTarget(track, event)),
-                on("drop", (event) => {
-                  stageDropTarget(track, event);
-                  finishDrag(true);
-                }),
+                on("drop", (event) => commitDrop(track, event)),
               ]}
               data-dragging={draggingTrackId === track.id ? "true" : undefined}
-              data-drop-target={dropTargetId === track.id ? "true" : undefined}
+              data-drop-position={dropTargetId === track.id ? dropPosition : undefined}
               data-upload-status={track.upload?.status}
             >
               {track.upload?.status === "uploading" ? (
@@ -491,15 +534,15 @@ export function TrackList(
                   radioStyle.dragHandle,
                   on("dragstart", (event) => {
                     draggingTrackId = track.id;
-                    dragOrder = state.tracks.map((candidate) => candidate.id);
-                    dropTargetId = track.id;
+                    dropTargetId = null;
+                    dropPosition = null;
                     if (event.dataTransfer) {
                       event.dataTransfer.effectAllowed = "move";
                       event.dataTransfer.setData("text/plain", track.id);
                     }
                     handle.update();
                   }),
-                  on("dragend", () => finishDrag(false)),
+                  on("dragend", finishDrag),
                   on("keydown", (event) => {
                     let destination: "up" | "down" | "first" | "last" | null =
                       event.key === "ArrowUp"
@@ -525,9 +568,11 @@ export function TrackList(
                 type="button"
                 mix={[
                   radioStyle.trackButton,
+                  editingTrackId === track.id ? radioStyle.editingTrackButton : null,
                   on("click", () => handle.props.client?.play(track.id)),
                 ]}
                 disabled={Boolean(track.upload)}
+                tabIndex={editingTrackId === track.id ? -1 : undefined}
               >
                 <span mix={radioStyle.queueIndex}>{String(index + 1).padStart(2, "0")}</span>
                 <span mix={radioStyle.queueTrack} title={track.title}>
@@ -559,30 +604,70 @@ export function TrackList(
                   autofocus={true}
                 />
               ) : null}
-              <span mix={radioStyle.trackActions}>
-                {editingTrackId === track.id ? null : (
-                  <button
-                    type="button"
-                    mix={[radioStyle.trackEditButton, on("click", () => beginRename(track))]}
-                    disabled={Boolean(track.upload)}
-                    aria-label={`Rename ${track.title}`}
-                    title={`Rename ${track.title}`}
-                  >
-                    Rename
-                  </button>
-                )}
+              <menu.Context label={`Actions for ${track.title}`}>
                 <button
                   type="button"
-                  mix={[
-                    radioStyle.trackRemoveButton,
-                    on("click", () => handle.props.client?.removeTrack(track.id)),
-                  ]}
-                  aria-label={`Remove ${track.title}`}
-                  title={`Remove ${track.title}`}
+                  mix={[radioStyle.trackMenuButton, menu.trigger({ placement: "bottom-end" })]}
+                  aria-label={`Actions for ${track.title}`}
+                  title={`Actions for ${track.title}`}
                 >
-                  Remove
+                  <span aria-hidden="true" mix={radioStyle.trackMenuGlyph}>
+                    more_vert
+                  </span>
                 </button>
-              </span>
+                <div mix={[radioStyle.trackMenuPopover, menu.popover()]}>
+                  <div
+                    mix={[
+                      radioStyle.trackMenuList,
+                      menu.list(),
+                      menu.onMenuSelect((event) => {
+                        if (event.item.name === "queue-next") queueNext(track);
+                        if (event.item.name === "rename") beginRename(track);
+                        if (event.item.name === "delete") {
+                          handle.props.client?.removeTrack(track.id);
+                        }
+                      }),
+                    ]}
+                  >
+                    <div
+                      aria-label="queue next"
+                      mix={[
+                        radioStyle.trackMenuItem,
+                        menu.item({ name: "queue-next", disabled: !canQueueNext(track) }),
+                      ]}
+                    >
+                      <span aria-hidden="true" mix={radioStyle.trackMenuItemIcon}>
+                        playlist_play
+                      </span>
+                      <span>queue next</span>
+                    </div>
+                    <div
+                      aria-label="rename"
+                      mix={[
+                        radioStyle.trackMenuItem,
+                        menu.item({
+                          name: "rename",
+                          disabled: Boolean(track.upload) || editingTrackId === track.id,
+                        }),
+                      ]}
+                    >
+                      <span aria-hidden="true" mix={radioStyle.trackMenuItemIcon}>
+                        edit
+                      </span>
+                      <span>rename</span>
+                    </div>
+                    <div
+                      aria-label="delete"
+                      mix={[radioStyle.trackMenuItem, menu.item({ name: "delete" })]}
+                    >
+                      <span aria-hidden="true" mix={radioStyle.trackMenuItemIcon}>
+                        close
+                      </span>
+                      <span>delete</span>
+                    </div>
+                  </div>
+                </div>
+              </menu.Context>
             </li>
           );
         })}

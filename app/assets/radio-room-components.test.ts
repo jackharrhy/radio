@@ -1,6 +1,7 @@
 import * as assert from "remix/assert";
 import { it } from "remix/test";
 import { jsx } from "remix/ui/jsx-runtime";
+import { MenuSelectEvent } from "remix/ui/menu/primitives";
 import { render } from "remix/ui/test";
 
 import type { Track } from "../data/protocol.ts";
@@ -76,14 +77,18 @@ it("keeps a drag position visible and commits a paused seek once", async () => {
     assert.equal(neutralOffset?.getAttribute("aria-hidden"), "true");
     assert.equal(neutralOffset?.getAttribute("aria-label"), null);
     assert.doesNotMatch(result.container.textContent ?? "", /paused|0ms calibration/);
-    assert.equal(
-      result.$('button[aria-label="Remove Track 1"]')?.getAttribute("title"),
-      "Remove Track 1",
-    );
+    let actions = result.$('button[aria-label="Actions for Track 1"]')!;
+    assert.equal(actions.getAttribute("title"), "Actions for Track 1");
+    assert.equal(actions.textContent?.trim(), "more_vert");
+    assert.equal(result.$('button[aria-label="Remove Track 1"]'), null);
+    assert.equal(result.$('button[aria-label="Rename Track 1"]'), null);
 
-    await result.act(() =>
-      result.$('button[aria-label="Rename Track 1"]')?.dispatchEvent(new MouseEvent("click")),
-    );
+    await result.act(() => actions.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    actions = result.$('button[aria-label="Actions for Track 1"]')!;
+    await result.act(async () => {
+      menuItem(actions, "rename").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await waitForMenuSelection();
+    });
     let renameInput = result.$('input[aria-label="Rename Track 1"]') as HTMLInputElement;
     renameInput.value = "Renamed track";
     await result.act(() => {
@@ -190,14 +195,38 @@ it("reorders tracks with drag and drop and with the keyboard", async () => {
     let thirdItem = result.$('button[aria-label="Reorder Track 3"]')!.closest("li")!;
     thirdItem.getBoundingClientRect = () =>
       ({ top: 0, height: 40, bottom: 40 }) as unknown as DOMRect;
-    await result.act(() => thirdItem.dispatchEvent(createDragEvent("dragover", 30)));
+    let dragOver = createDragEvent("dragover", 10);
+    await result.act(() => thirdItem.dispatchEvent(dragOver));
+    assert.equal(dragOver.defaultPrevented, true);
+    assert.equal(dragOver.dataTransfer.dropEffect, "move");
+    assert.equal(thirdItem.getAttribute("data-drop-position"), "before");
+    assert.deepEqual(orders, []);
 
     thirdItem = result.$('button[aria-label="Reorder Track 3"]')!.closest("li")!;
     thirdItem.getBoundingClientRect = () =>
       ({ top: 0, height: 40, bottom: 40 }) as unknown as DOMRect;
-    await result.act(() => thirdItem.dispatchEvent(createDragEvent("drop", 30)));
+    dragOver = createDragEvent("dragover", 30);
+    await result.act(() => thirdItem.dispatchEvent(dragOver));
+    assert.equal(thirdItem.getAttribute("data-drop-position"), "after");
+    assert.deepEqual(
+      [...result.container.querySelectorAll('button[aria-label^="Reorder "]')].map((button) =>
+        button.getAttribute("aria-label"),
+      ),
+      ["Reorder Track 1", "Reorder Track 2", "Reorder Track 3"],
+    );
 
+    thirdItem = result.$('button[aria-label="Reorder Track 3"]')!.closest("li")!;
+    thirdItem.getBoundingClientRect = () =>
+      ({ top: 0, height: 40, bottom: 40 }) as unknown as DOMRect;
+    let drop = createDragEvent("drop", 30);
+    await result.act(() => thirdItem.dispatchEvent(drop));
+
+    assert.equal(drop.defaultPrevented, true);
+    assert.equal(drop.dataTransfer.dropEffect, "move");
     assert.deepEqual(orders, [["track-2", "track-3", "track-1"]]);
+    firstHandle = result.$('button[aria-label="Reorder Track 1"]')!;
+    await result.act(() => firstHandle.dispatchEvent(createDragEvent("dragend", 30)));
+    assert.equal(orders.length, 1);
 
     await result.act(() =>
       result
@@ -210,7 +239,69 @@ it("reorders tracks with drag and drop and with the keyboard", async () => {
   }
 });
 
-it("keeps actionable queue progress and groups compact track actions", () => {
+it("queues a track next and routes rename and delete through one action menu", async () => {
+  let orders: string[][] = [];
+  let renames: Array<[string, string]> = [];
+  let removals: string[] = [];
+  let state: RadioClientState = {
+    connected: true,
+    synced: true,
+    offsetMs: 0,
+    rttMs: 1,
+    ...DEFAULT_SYNC_DIAGNOSTICS,
+    tracks,
+    clients: [],
+    currentTrackId: "track-1",
+    bufferingTrackId: null,
+    readyClientCount: 0,
+    totalClientCount: 0,
+    bufferedSeconds: 0,
+    playing: true,
+    positionSeconds: 10,
+    durationSeconds: 100,
+    volume: 1,
+    status: "Playing",
+  };
+  let client = {
+    reorderTracks(trackIds: string[]) {
+      orders.push(trackIds);
+    },
+    renameTrack(trackId: string, title: string) {
+      renames.push([trackId, title]);
+    },
+    removeTrack(trackId: string) {
+      removals.push(trackId);
+    },
+  } as RadioClient;
+  let result = render(jsx(TrackList, { state, client, surface: 720 }));
+
+  try {
+    let currentActions = result.$('button[aria-label="Actions for Track 1"]')!;
+    assert.equal(menuItem(currentActions, "queue next").getAttribute("aria-disabled"), "true");
+
+    let thirdActions = result.$('button[aria-label="Actions for Track 3"]')!;
+    await result.act(() => selectMenuAction(thirdActions, "queue-next", "queue next"));
+    assert.deepEqual(orders, [["track-1", "track-3", "track-2"]]);
+
+    let secondActions = result.$('button[aria-label="Actions for Track 2"]')!;
+    await result.act(() => selectMenuAction(secondActions, "rename", "rename"));
+    let renameInput = result.$('input[aria-label="Rename Track 2"]') as HTMLInputElement;
+    renameInput.value = "Second track";
+    await result.act(() => {
+      renameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      renameInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    assert.deepEqual(renames, [["track-2", "Second track"]]);
+
+    secondActions = result.$('button[aria-label="Actions for Track 2"]')!;
+    await result.act(() => selectMenuAction(secondActions, "delete", "delete"));
+    assert.deepEqual(removals, ["track-2"]);
+  } finally {
+    result.cleanup();
+  }
+});
+
+it("keeps actionable queue progress and offers one compact action menu", () => {
   let uploadingTrack: Track = {
     id: "track-upload",
     title: "Uploading track",
@@ -245,9 +336,12 @@ it("keeps actionable queue progress and groups compact track actions", () => {
     assert.match(queueText, /↑ 31%/);
     assert.doesNotMatch(queueText, /buf|22%/);
 
-    let rename = result.$('button[aria-label="Rename Track 1"]');
-    let remove = result.$('button[aria-label="Remove Track 1"]');
-    assert.equal(rename?.parentElement, remove?.parentElement);
+    assert.equal(result.container.querySelectorAll('button[aria-label^="Actions for "]').length, 2);
+    assert.equal(result.$('button[aria-label="Rename Track 1"]'), null);
+    assert.equal(result.$('button[aria-label="Remove Track 1"]'), null);
+    let uploadingActions = result.$('button[aria-label="Actions for Uploading track"]')!;
+    assert.equal(menuItem(uploadingActions, "queue next").getAttribute("aria-disabled"), "true");
+    assert.equal(menuItem(uploadingActions, "rename").getAttribute("aria-disabled"), "true");
   } finally {
     result.cleanup();
   }
@@ -262,13 +356,43 @@ function createPointerEvent(type: string, clientX: number): Event {
   return event;
 }
 
-function createDragEvent(type: string, clientY: number): Event {
-  let event = new Event(type, { bubbles: true, cancelable: true });
+function menuItem(actions: Element, label: string): HTMLElement {
+  let item = [...actions.closest("li")!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (candidate) => candidate.getAttribute("aria-label") === label,
+  );
+  if (!item) throw new Error(`Could not find ${label} in the track action menu`);
+  return item;
+}
+
+function waitForMenuSelection(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 80));
+}
+
+function selectMenuAction(actions: Element, name: string, label: string): boolean {
+  return menuItem(actions, label).dispatchEvent(
+    new MenuSelectEvent({
+      id: `test-${name}`,
+      label,
+      name,
+      type: "item",
+      value: null,
+    }),
+  );
+}
+
+function createDragEvent(
+  type: string,
+  clientY: number,
+): Event & { dataTransfer: { dropEffect: string } } {
+  let event = new Event(type, { bubbles: true, cancelable: true }) as Event & {
+    dataTransfer: { dropEffect: string };
+  };
   Object.defineProperties(event, {
     clientY: { value: clientY },
     dataTransfer: {
       value: {
         effectAllowed: "none",
+        dropEffect: "none",
         setData() {},
       },
     },
