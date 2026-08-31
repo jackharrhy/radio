@@ -8,6 +8,37 @@ import {
 } from "../ui/desktop/styles.ts";
 import { desktopColor } from "../ui/desktop/theme.ts";
 
+const radioScrollbarStyle = {
+  scrollbarWidth: "thin",
+  scrollbarColor: "#7f9299 transparent",
+  "&::-webkit-scrollbar": {
+    width: "8px",
+    height: "8px",
+  },
+  "&::-webkit-scrollbar-track": {
+    background: "transparent",
+  },
+  "&::-webkit-scrollbar-thumb": {
+    minHeight: "28px",
+    border: "2px solid transparent",
+    borderRadius: "4px",
+    background: "#7f9299",
+    backgroundClip: "padding-box",
+  },
+  "&::-webkit-scrollbar-thumb:hover": {
+    background: "#607077",
+    backgroundClip: "padding-box",
+  },
+  "&::-webkit-scrollbar-button": {
+    display: "none",
+    width: 0,
+    height: 0,
+  },
+  "&::-webkit-scrollbar-corner": {
+    background: "transparent",
+  },
+} as const;
+
 export const radioStyle = {
   window: desktopStyle.window,
   panel: desktopStyle.panel,
@@ -193,7 +224,12 @@ export const radioStyle = {
     "& h2": { margin: 0, fontSize: "14px", fontWeight: 400 },
     "& button": { flex: "0 0 auto" },
   }),
-  queueScroll: css({ overflow: "auto", overscrollBehavior: "contain", minHeight: 0 }),
+  queueScroll: css({
+    ...radioScrollbarStyle,
+    overflow: "auto",
+    overscrollBehavior: "contain",
+    minHeight: 0,
+  }),
   listeners: css({
     display: "grid",
     gridTemplateRows: "38px minmax(0, 1fr)",
@@ -213,6 +249,7 @@ export const radioStyle = {
     background: `linear-gradient(${desktopColor.paper}, ${desktopColor.wash})`,
   }),
   list: css({
+    ...radioScrollbarStyle,
     listStyle: "none",
     padding: 0,
     margin: 0,
