@@ -158,13 +158,8 @@ export function KitchenSinkPage() {
         <div mix={sinkStyle.stack}>
           <SinkSection id="home" title="home">
             <div mix={sinkStyle.homeStack}>
-              <Specimen label="signed out / validation">
-                <RoomLobby
-                  rooms={rooms}
-                  identity={null}
-                  selectedRoom="cozy"
-                  message="Choose a room and enter a name."
-                />
+              <Specimen label="signed out">
+                <RoomLobby rooms={rooms} identity={null} selectedRoom="cozy" />
               </Specimen>
               <Specimen label="signed in">
                 <RoomLobby

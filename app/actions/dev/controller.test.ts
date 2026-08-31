@@ -27,8 +27,14 @@ it("renders the development kitchen sink with representative radio states", asyn
 
   assert.equal(response.status, 200);
   assert.match(html, /<title>Radio \/ UI<\/title>/);
-  assert.match(html, /signed out \/ validation/);
-  assert.match(html, /available rooms/);
+  assert.match(html, /signed out/);
+  assert.match(html, /aria-label="Rooms"/);
+  assert.match(html, /name="room" value="cozy"[^>]*data-selected="true"/);
+  assert.match(html, /placeholder="username"/);
+  assert.match(html, /placeholder="password"/);
+  assert.match(html, />join<\/button>/);
+  assert.doesNotMatch(html, /Choose a room and enter a name/);
+  assert.doesNotMatch(html, /type="radio"/);
   assert.match(html, /aria-label="Breadcrumb"/);
   assert.match(html, /aria-current="page"[^>]*>rooms/);
   assert.match(html, /start a room/);

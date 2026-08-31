@@ -5,7 +5,7 @@ import type { RoomRecord } from "../data/radio-runtime.ts";
 import type { RadioIdentity } from "../middleware/access.ts";
 import { routes } from "../routes.ts";
 import { desktopColor } from "./desktop/theme.ts";
-import { desktopStyle } from "./desktop/styles.ts";
+import { desktopControlStyle, desktopStyle } from "./desktop/styles.ts";
 import { RadioHeader } from "./radio-header.tsx";
 
 export function RoomLobby(
@@ -29,60 +29,63 @@ export function RoomLobby(
             </p>
           ) : null}
 
-          <form
-            method="post"
-            action={routes.join.href()}
-            data-authenticated={identity ? "true" : "false"}
-            mix={roomLobbyStyle.form}
-          >
-            <fieldset mix={roomLobbyStyle.rooms}>
-              <legend mix={roomLobbyStyle.legend}>available rooms</legend>
+          <div mix={roomLobbyStyle.joinPanel}>
+            <form
+              method="get"
+              action={routes.home.href()}
+              aria-label="Rooms"
+              mix={roomLobbyStyle.rooms}
+            >
               {rooms.map((room) => (
-                <label key={room.slug} aria-label={`Join ${room.name}`} mix={roomLobbyStyle.room}>
-                  <input
-                    type="radio"
-                    name="roomSlug"
-                    value={room.slug}
-                    checked={room.slug === selectedRoom}
-                    required={true}
-                  />
-                  <span>
-                    <strong>{room.name}</strong>
-                    <small>/{room.slug}</small>
-                  </span>
-                </label>
+                <button
+                  key={room.slug}
+                  type="submit"
+                  name="room"
+                  value={room.slug}
+                  aria-label={room.slug === selectedRoom ? `${room.name}, selected` : room.name}
+                  data-selected={room.slug === selectedRoom ? "true" : undefined}
+                  mix={roomLobbyStyle.room}
+                >
+                  {room.name}
+                </button>
               ))}
-            </fieldset>
+            </form>
 
-            <label mix={roomLobbyStyle.field}>
-              <span>your name</span>
+            <form
+              method="post"
+              action={routes.join.href()}
+              data-authenticated={identity ? "true" : "false"}
+              mix={roomLobbyStyle.joinForm}
+            >
+              <input name="roomSlug" type="hidden" value={selectedRoom} />
               <input
                 mix={desktopStyle.input}
                 name="name"
                 type="text"
                 autocomplete="name"
+                aria-label="Username"
+                placeholder="username"
                 value={identity?.name ?? ""}
                 maxlength={40}
                 required={true}
               />
-            </label>
-            {!identity ? (
-              <label mix={roomLobbyStyle.field}>
-                <span>password</span>
+              {!identity ? (
                 <input
                   mix={desktopStyle.input}
                   name="password"
                   type="password"
                   autocomplete="current-password"
+                  aria-label="Password"
+                  placeholder="password"
                   maxlength={256}
                   required={true}
                 />
-              </label>
-            ) : null}
-            <button mix={[desktopStyle.primaryButton, roomLobbyStyle.joinButton]} type="submit">
-              tune in
-            </button>
-          </form>
+              ) : null}
+              <button mix={[desktopStyle.primaryButton, roomLobbyStyle.joinButton]} type="submit">
+                join
+              </button>
+            </form>
+          </div>
 
           {identity ? (
             <section mix={[desktopStyle.panel, roomLobbyStyle.createPanel]}>
@@ -144,15 +147,19 @@ const roomLobbyStyle = {
     background: "#fff3cd",
     border: `1px solid ${desktopColor.line}`,
   }),
-  form: css({
+  joinPanel: css({
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto",
     gap: "12px",
     padding: "14px",
     background: desktopColor.paper,
     border: `1px solid ${desktopColor.line}`,
     boxShadow: "0 0 0 1px #fff inset",
-    "& > fieldset": { gridColumn: "1 / -1" },
+  }),
+  joinForm: css({
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto",
+    alignItems: "end",
+    gap: "12px",
     '&[data-authenticated="true"]': { gridTemplateColumns: "minmax(0, 1fr) auto" },
     "@media (max-width: 620px)": {
       gridTemplateColumns: "1fr",
@@ -161,38 +168,29 @@ const roomLobbyStyle = {
     },
   }),
   rooms: css({
-    border: 0,
-    padding: 0,
-    margin: 0,
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
     gap: "8px",
   }),
-  legend: css({
-    padding: "0 0 6px",
-    fontSize: "12px",
-    textTransform: "uppercase",
-    letterSpacing: "0.1em",
-  }),
   room: css({
-    display: "flex",
-    alignItems: "center",
-    gap: "9px",
-    padding: "11px",
-    cursor: "pointer",
-    background: desktopColor.paper,
-    border: `1px solid ${desktopColor.line}`,
-    transition: "background 120ms ease, box-shadow 120ms ease",
-    "&:hover": { background: desktopColor.wash },
-    "&:focus-within": { outline: `2px solid ${desktopColor.accent}`, outlineOffset: "2px" },
-    "&:has(input:checked)": {
+    ...desktopControlStyle.button,
+    width: "100%",
+    height: "auto",
+    minHeight: "42px",
+    padding: "7px 11px",
+    textAlign: "center",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
+    "&:hover": {
       background: desktopColor.wash,
-      borderColor: desktopColor.ink,
+      borderColor: desktopColor.accent,
     },
+    '&[data-selected="true"]': {
+      background: desktopColor.accentSoft,
+      borderColor: desktopColor.ink,
+      boxShadow: `0 1px #fff inset, 0 0 0 1px ${desktopColor.paper} inset`,
+    },
+    "&:active": { background: desktopColor.accentSoft, transform: "translateY(1px)" },
     "@media (prefers-reduced-motion: reduce)": { transition: "none" },
-    "& input": { accentColor: desktopColor.accent },
-    "& span": { display: "grid" },
-    "& small": { color: "#59666d" },
   }),
   field: css({
     minWidth: 0,

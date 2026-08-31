@@ -206,7 +206,12 @@ describe("Worker HTTP boundary", () => {
     let root = await request("/", { redirect: "manual" });
     expect(root.status).toBe(200);
     let rootHtml = await root.text();
-    expect(rootHtml).toContain("available rooms");
+    expect(rootHtml).toContain('aria-label="Rooms"');
+    expect(rootHtml).toContain('name="room" value="cozy"');
+    expect(rootHtml).toContain('placeholder="username"');
+    expect(rootHtml).toContain('placeholder="password"');
+    expect(rootHtml).toContain(">join</button>");
+    expect(rootHtml).not.toContain('type="radio"');
     expect(rootHtml).toContain('aria-label="Breadcrumb"');
 
     await ensureRoom("http-room", "HTTP room");
