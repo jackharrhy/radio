@@ -1,4 +1,4 @@
-ARG CELLD_IMAGE=ghcr.io/jackharrhy/celld@sha256:6d5fce89803e6addb970e13ca3180313f3345c4fd904740b7bcd131c8fb21e28
+ARG CELLD_IMAGE=ghcr.io/jackharrhy/celld:latest
 FROM ${CELLD_IMAGE} AS celld
 
 FROM node:26-bookworm-slim@sha256:cd565714d4da3e84bfd341e31448f81d47c6362198f152345297c9c1154e6341 AS build

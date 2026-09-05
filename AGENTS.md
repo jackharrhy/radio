@@ -84,11 +84,11 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
 - The approved production boundary is one Celld runtime behind Traefik TLS with rate limiting on the
   native `/join` action. Expose only Celld's public Worker listener; keep its internal
   peer/operator listener private.
-- Production targets the pinned `jackharrhy/celld` fork's explicitly single-node SQLite object
+- Production targets the `jackharrhy/celld` fork's explicitly single-node SQLite object
   store. The ordinary `sqlite:///absolute/path/objects.sqlite3` bucket configuration must work
   for deployment, diagnostics, and runtime startup; do not use `CELLD_INTERNAL_DEV_STORE` or
   `celld dev` as a production shortcut.
-- The Radio image copies `/usr/local/bin/celld` from one digest-pinned fork OCI image. Keep that
+- The Radio image copies `/usr/local/bin/celld` from `ghcr.io/jackharrhy/celld:latest`. Keep that
   runtime independent of Radio's build; never download a floating install script in Docker.
 - Keep authoritative objects at `/app/.celld/object-store/objects.sqlite3` and replica/cache
   files at `/app/.celld/state`, under the persistent `/app/.celld` mount. A cache cleanup must
@@ -100,13 +100,17 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
   default storage dependency. Do not add separate deployment-image or bootstrap services.
 - Preserve all room and media APIs and the full 1 GiB upload limit. A backend change must preserve
   room IDs, track keys, queue/playback state, audio bytes, attributes, and range/HEAD behavior.
-- Pushes to `main` publish the single-platform `linux/amd64` image as `ghcr.io/jackharrhy/radio:main`.
+- Pushes to `main` publish the single-platform `linux/amd64` image as
+  `ghcr.io/jackharrhy/radio:latest`, with `:main` and commit tags retained. After CI passes,
+  deploy through the infra repository's ordinary `cli.py refresh` / `cli.py update` flow.
 
 ## Verification
 
 - Use Remix route/server tests for rendering and real Worker tests for HTTP and coordination behavior.
 - Use component tests only for DOM-specific behavior.
 - Add regression coverage for lifecycle, reconnect, synchronization, and persistence bugs.
-- Finish changes with `npm test`, `npm run typecheck`, `remix doctor`, and `npm run test:celld`
-  against the exact fork binary. The smoke test uses only its own rooms and storage; it must
+- Run `npm run check` and `npx remix doctor`; CI also runs `npm run test:celld` against the fork
+  image selected by `Dockerfile`. The smoke test uses only its own rooms and storage; it must
   preserve acknowledged queue changes and audio after SIGKILL with an empty replica directory.
+- Use the optional full 1 GiB container smoke when investigating storage or resource-limit
+  changes. Ordinary deployments use the published image after CI passes.

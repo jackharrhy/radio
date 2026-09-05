@@ -51,9 +51,10 @@ jobs:
           set -eu
           radio_celld_image=$(sed -n 's/^ARG CELLD_IMAGE=//p' Dockerfile)
           case "$radio_celld_image" in
-            *@sha256:*) ;;
-            *) echo "Dockerfile must pin the Celld image by digest" >&2; exit 1 ;;
+            ghcr.io/jackharrhy/celld:?* | ghcr.io/jackharrhy/celld@sha256:?*) ;;
+            *) echo "Dockerfile must select a published jackharrhy/celld image" >&2; exit 1 ;;
           esac
+          docker pull "$radio_celld_image"
           radio_celld_container=$(docker create "$radio_celld_image" --version)
           trap 'docker rm "$radio_celld_container" >/dev/null' EXIT
           docker cp "$radio_celld_container:/usr/local/bin/celld" "$RUNNER_TEMP/celld"
@@ -110,6 +111,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=latest
             type=raw,value=main
             type=sha,prefix=sha-,format=long
 
@@ -119,6 +121,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          pull: true
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}

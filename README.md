@@ -15,8 +15,8 @@ npm run dev
 ```
 
 Use `npm run dev:celld` for a compatibility run on Celld, serving
-<http://127.0.0.1:9876> with disposable local state under `.celld/dev/`. Use the fork revision
-pinned in `Dockerfile` for this run and expose `CELLD_VAR_RADIO_PASSWORD` and
+<http://127.0.0.1:9876> with disposable local state under `.celld/dev/`. Use the Celld fork
+selected in `Dockerfile` for this run and expose `CELLD_VAR_RADIO_PASSWORD` and
 `CELLD_VAR_RADIO_SESSION_SECRET`. Production uses the ordinary Celld runtime and public SQLite
 bucket configuration described below. The public lobby seeds `cozy` automatically, and
 authenticated listeners can create additional persistent rooms.
@@ -37,10 +37,12 @@ npx remix doctor
 
 ## Production model
 
-The application image includes Radio and copies `/usr/local/bin/celld` from the digest-pinned
-[jackharrhy/celld](https://github.com/jackharrhy/celld) fork in `Dockerfile`. The same runtime
-artifact can serve other applications. Pushes to `main` publish the `linux/amd64` image as
-`ghcr.io/jackharrhy/radio:main` and a commit tag; deployments should select an immutable digest.
+The application image includes Radio and copies `/usr/local/bin/celld` from
+`ghcr.io/jackharrhy/celld:latest`, the [Celld fork](https://github.com/jackharrhy/celld) with native
+SQLite object storage. Pushes to `main` run the application checks and real-Celld smoke, then
+publish the `linux/amd64` image as `ghcr.io/jackharrhy/radio:latest`, `:main`, and a commit tag.
+Deploy ordinary updates through the infra repository's `cli.py refresh` / `cli.py update` flow.
+Each CI build pulls the current fork image; rebuilding Radio in CI picks up a new fork release.
 
 One container prepares the configured backend, runs `celld diagnose`, deploys the Worker and
 built assets, then execs Celld. The default `CELLD_BUCKET` is
@@ -81,7 +83,8 @@ with its WAL; copying a live main database file alone is insufficient. Never rem
 
 ## Real Celld verification
 
-Run the production smoke against the exact fork binary used by the image:
+CI runs the production smoke with an 8 MiB payload using the fork selected by `Dockerfile`.
+To investigate runtime or storage changes locally:
 
 ```sh
 CELLD_BIN=/absolute/path/to/celld npm run test:celld -- --output /tmp/radio-sqlite-smoke.json
@@ -105,13 +108,13 @@ checks to run; the result is `passed_with_known_limitations`. SQLite always requ
 ranges to pass. These are runtime process-crash checks on the same host, not disk-loss or
 host-loss tests.
 
-Before promoting any fork or Radio runtime update, qualify the exact Radio application image
-with the full 1 GiB upload under **one CPU and 1 GiB of memory**. The 8 MiB host CI smoke does
-not replace this release gate. On a Linux Docker host with cgroup v2, run a locally available
-image with swap disabled:
+For storage or resource-limit investigations, the optional full 1 GiB container smoke runs under
+**one CPU and 1 GiB of memory**, with swap disabled. On a Linux Docker host with cgroup v2,
+pull the image and run:
 
 ```sh
-node scripts/test-celld.mjs --image "$RADIO_IMAGE" --upload-bytes 1073741824 --output /tmp/radio-container-smoke.json
+docker pull ghcr.io/jackharrhy/radio:latest
+node scripts/test-celld.mjs --image ghcr.io/jackharrhy/radio:latest --upload-bytes 1073741824 --output /tmp/radio-container-smoke.json
 ```
 
 The container test uses Docker's host network and a fresh temporary bind mount. It runs as the
