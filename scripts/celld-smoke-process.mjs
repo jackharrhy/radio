@@ -288,7 +288,11 @@ export class CelldSmokeProcess {
   }
 
   removeContainer() {
-    const removed = spawnSync("docker", ["rm", "--force", this.container], { encoding: "utf8" });
+    const removed = spawnSync("docker", ["rm", "--force", this.container], {
+      encoding: "utf8",
+      timeout: 15_000,
+      killSignal: "SIGKILL",
+    });
     if (removed.error) throw removed.error;
     if (
       removed.status !== 0 &&
@@ -304,7 +308,11 @@ export class CelldSmokeProcess {
   }
 
   command(executable, args) {
-    const executed = spawnSync(executable, args, { encoding: "utf8" });
+    const executed = spawnSync(executable, args, {
+      encoding: "utf8",
+      timeout: 30_000,
+      killSignal: "SIGKILL",
+    });
     if (executed.error) throw executed.error;
     assert.equal(executed.status, 0, `${executable} ${args.join(" ")}: ${executed.stderr}`);
     return executed.stdout;
