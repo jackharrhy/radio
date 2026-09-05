@@ -46,6 +46,20 @@ jobs:
       - name: Check Remix structure
         run: npx remix doctor
 
+      - name: Verify the production Celld runtime
+        run: |
+          set -eu
+          radio_celld_image=$(sed -n 's/^ARG CELLD_IMAGE=//p' Dockerfile)
+          case "$radio_celld_image" in
+            *@sha256:*) ;;
+            *) echo "Dockerfile must pin the Celld image by digest" >&2; exit 1 ;;
+          esac
+          radio_celld_container=$(docker create "$radio_celld_image" --version)
+          trap 'docker rm "$radio_celld_container" >/dev/null' EXIT
+          docker cp "$radio_celld_container:/usr/local/bin/celld" "$RUNNER_TEMP/celld"
+          chmod +x "$RUNNER_TEMP/celld"
+          CELLD_BIN="$RUNNER_TEMP/celld" npm run test:celld -- --output "$RUNNER_TEMP/radio-celld-smoke.json"
+
   actions-security:
     name: GitHub Actions security
     runs-on: ubuntu-24.04

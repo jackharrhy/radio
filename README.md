@@ -6,22 +6,20 @@ hibernatable WebSockets. Audio content lives in the `TRACKS` R2-compatible objec
 
 ## Local development
 
-Install Node.js 26+, dependencies, and Celld 0.4.0 or newer:
+Install Node.js 26+ and dependencies, then start Wrangler's local development server:
 
 ```sh
-npm install
+npm ci
 cp .dev.vars.example .dev.vars
-curl -fsSL https://celld.dev/install.sh | sh
 npm run dev
 ```
 
-Wrangler provides the normal local development server. Use `npm run dev:celld` for a compatibility
-run on the real Celld runtime, which serves <http://127.0.0.1:9876> and stores its local state under
-`.celld/dev/`. For this run, expose the same values as `CELLD_VAR_RADIO_PASSWORD` and
-`CELLD_VAR_RADIO_SESSION_SECRET`. Celld 0.4.0 currently detects a spurious source change after startup in this repo;
-the application works, but its development watcher may repeatedly rebuild. The root redirects to
-the public room lobby. `cozy` is seeded automatically, and authenticated listeners can create
-additional persistent rooms there.
+Use `npm run dev:celld` for a compatibility run on Celld, serving
+<http://127.0.0.1:9876> with disposable local state under `.celld/dev/`. Use the fork revision
+pinned in `Dockerfile` for this run and expose `CELLD_VAR_RADIO_PASSWORD` and
+`CELLD_VAR_RADIO_SESSION_SECRET`. Production uses the ordinary Celld runtime and public SQLite
+bucket configuration described below. The public lobby seeds `cozy` automatically, and
+authenticated listeners can create additional persistent rooms.
 
 Client assets are prebuilt into ignored `dist/client/` files because a Worker has no source
 filesystem from which `remix/assets` can compile modules on demand.
@@ -39,49 +37,88 @@ npx remix doctor
 
 ## Production model
 
-`wrangler.jsonc` is accepted by both Celld and Wrangler. A Celld fleet runs one deployed
-application and stores its deployment, cell databases, ownership records, and replication state
-in its configured fleet bucket. The `TRACKS` binding is a separate logical R2 bucket within that
-deployment. Public TLS remains Traefik's responsibility; Radio owns shared-password login and its
-signed 30-day listener session.
+The application image includes Radio and copies `/usr/local/bin/celld` from the digest-pinned
+[jackharrhy/celld](https://github.com/jackharrhy/celld) fork in `Dockerfile`. The same runtime
+artifact can serve other applications. Pushes to `main` publish the `linux/amd64` image as
+`ghcr.io/jackharrhy/radio:main` and a commit tag; deployments should select an immutable digest.
 
-Build and publish the application to a configured fleet bucket:
+One container prepares the configured backend, runs `celld diagnose`, deploys the Worker and
+built assets, then execs Celld. The default `CELLD_BUCKET` is
+`sqlite:///app/.celld/object-store/objects.sqlite3`, with replica files under
+`CELLD_WATCH=/app/.celld/state`. Persist the entire `/app/.celld` directory and allow the image's
+`node` user to write it. The SQLite object store is authoritative: it contains deployments,
+Durable Object replication records, and the logical `TRACKS` R2 bucket, including audio bytes.
+The room directory, queues, playback state, and track metadata remain in their existing Durable
+Object SQLite schemas. Replica files can be rebuilt from the object store.
+
+This backend runs one Radio runtime per local store. It has no host-loss failover or multi-host
+shared-disk mode. The fork rejects a second runtime using the same store. The public Worker
+listener is `0.0.0.0:44100`; its internal listener stays on loopback. Traefik terminates TLS and
+should rate-limit `/join`. Radio owns its shared-password login and signed 30-day session.
+
+Set `CELLD_VAR_RADIO_PASSWORD` and a random 32-character-or-longer
+`CELLD_VAR_RADIO_SESSION_SECRET`. When enabling `CELLD_TRUST_FORWARDED_HEADERS=1`, configure
+Traefik to replace forwarded host/protocol headers. Only the public listener should be exposed.
+The application has no individual accounts or room-level authorization: every holder of the
+shared password can see, create, and mutate every room. The upload limit remains **1 GiB**
+(1,073,741,824 bytes) per track.
+
+Azure remains available for baseline comparisons and migration. Set `CELLD_BUCKET=az://CONTAINER`
+and `AZURE_STORAGE_USE_EMULATOR=true` for Azurite. `AZURITE_BLOB_STORAGE_URL` selects the emulator's
+base URL, such as `http://azurite:10000`; startup creates the container with the public emulator
+credentials. Set `AZURE_STORAGE_USE_EMULATOR=false` and provide the usual Celld Azure credentials
+for a pre-provisioned Azure container. The application and its Worker bindings are identical for
+both backends.
+
+Changing `CELLD_BUCKET` does not migrate existing data. Before a backend cutover, stop writers,
+keep a recoverable snapshot of the old backend, and use the fork's object-store migration tooling
+to copy every object and attribute. Verify room IDs, directory entries, queue/playback state,
+track keys, sizes, hashes, and ranged media responses against the source before routing traffic
+to the new backend. Preserve the original backend until that comparison passes. For subsequent
+SQLite backups, use a consistent SQLite backup or stop the runtime and preserve the database
+with its WAL; copying a live main database file alone is insufficient. Never remove
+`object-store/` when clearing the replica cache.
+
+## Real Celld verification
+
+Run the production smoke against the exact fork binary used by the image:
 
 ```sh
-npm run deploy:celld -- --bucket "$CELLD_BUCKET"
+CELLD_BIN=/absolute/path/to/celld npm run test:celld -- --output /tmp/radio-sqlite-smoke.json
+CELLD_BIN=/absolute/path/to/celld npm run test:celld -- --upload-bytes 1073741824 --output /tmp/radio-1gib-smoke.json
+CELLD_BIN=/absolute/path/to/celld npm run test:celld -- --backend azurite --azurite-url http://127.0.0.1:10000 --allow-azure-suffix-limitation --output /tmp/radio-azurite-smoke.json
 ```
 
-Then start one or more Celld nodes against that bucket. Public TLS and authentication remain the
-responsibility of Traefik. Only Celld's public Worker listener may be exposed; its internal peer
-and operator listener must remain on a trusted private network.
+Install Playwright's Chromium with `npx playwright install chromium` if needed. The test builds
+production assets, uses a temporary store and random authentication credentials, creates a room,
+uploads a deterministic WAV through the real streaming API, checks browser decoding/playback,
+and verifies the complete SHA-256, HEAD, and bounded/suffix byte ranges. It acknowledges queue,
+volume, and paused-position changes over an authenticated WebSocket, kills Celld with SIGKILL,
+removes its replica directory, restarts through
+the production startup script, and verifies the directory, room state, and media again. The
+payload defaults to 8 MiB; the explicit 1 GiB run checks the application limit. Failures exit
+nonzero and retain the temporary state and runtime log. Use `--keep-state` to retain a successful
+run's files. On Linux, the report also records the runtime's peak RSS. Azurite must already be running; each test creates its own uniquely named container.
+The Azure adapter currently rejects suffix ranges. The explicit
+`--allow-azure-suffix-limitation` flag records that HTTP failure and permits the remaining Azure
+checks to run; the result is `passed_with_known_limitations`. SQLite always requires suffix
+ranges to pass. These are runtime process-crash checks on the same host, not disk-loss or
+host-loss tests.
 
-Pushes to `main` publish `ghcr.io/jackharrhy/radio:main`, which is a pinned Celld runtime image;
-the image no longer contains the Radio application. Publishing the image and deploying the
-application are deliberately separate operations. Before rolling the image into production:
+Before promoting any fork or Radio runtime update, qualify the exact Radio application image
+with the full 1 GiB upload under **one CPU and 1 GiB of memory**. The 8 MiB host CI smoke does
+not replace this release gate. On a Linux Docker host with cgroup v2, run a locally available
+image with swap disabled:
 
-1. Provision an S3-compatible fleet bucket and credentials, then deploy Radio to it with
-   `npm run deploy:celld -- --bucket "$CELLD_BUCKET"`.
-2. Configure every node with the same `CELLD_BUCKET`, `S3_ENDPOINT`, `AWS_REGION`, and AWS
-   credentials. Persist `/app/.celld`, Celld's local SQLite and replication working directory.
-3. For a multi-node fleet, override the image's loopback-only `CELLD_INTERNAL_ADDR`, set a unique
-   peer-reachable `CELLD_ADVERTISE` value on each node, and keep that listener private. The
-   loopback default intentionally supports only one node.
-4. Set `CELLD_VAR_RADIO_PASSWORD` and a random 32-character-or-longer
-   `CELLD_VAR_RADIO_SESSION_SECRET` on every node. Point Traefik at port `44100`, replace both
-   forwarded host/protocol headers before enabling `CELLD_TRUST_FORWARDED_HEADERS=1`, and rate
-   limit the `/join` endpoint.
-5. Confirm the public lobby, signed login, room creation, and a WebSocket room join.
+```sh
+node scripts/test-celld.mjs --image "$RADIO_IMAGE" --upload-bytes 1073741824 --output /tmp/radio-container-smoke.json
+```
 
-Running nodes poll the fleet deployment pointer, so later `celld deploy` releases are adopted
-without rebuilding or restarting the node image.
-
-For a self-hosted installation, CI publishes the generic deployer target as
-`ghcr.io/jackharrhy/radio-celld-deployer`. Provision the configured bucket before running it. The
-production deployment uses private, persistent MinIO storage and runs `celld diagnose` before
-deploying.
-
-The application still has no individual accounts or room-level authorization. Every holder of the
-shared password can see, create, and mutate every room.
+The container test uses Docker's host network and a fresh temporary bind mount. It runs as the
+invoking host UID/GID so the mount remains writable, inspects the
+actual CPU/memory limits, and verifies the killed container's host PID has exited. It records
+both Celld's peak RSS and the cgroup memory peak, and requires zero OOM kills. The
+image's existing built application and bundled Celld binary are used throughout both starts.
 
 ## Room and storage ownership
 

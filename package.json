@@ -17,6 +17,7 @@
     "test": "npm run build && npm run test:remix && npm run test:worker",
     "test:remix": "NODE_ENV=test remix test \"app/**/*.test.{ts,tsx}\" --type server --type browser",
     "test:worker": "vitest run --config vitest.config.ts",
+    "test:celld": "NODE_ENV=production npm run build && node scripts/test-celld.mjs",
     "typecheck": "tsc --noEmit",
     "types:worker": "wrangler types worker-configuration.d.ts"
   },

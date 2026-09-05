@@ -15,6 +15,7 @@ npm run lint
 npm run check
 npm run dev:celld
 npm test
+npm run test:celld
 npm run typecheck
 ```
 
@@ -80,17 +81,25 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
   than WebSocket messages.
 - Authentication currently uses one shared application password. There are no individual users,
   room owners, or room-level permissions; every password holder can create and mutate every room.
-- The approved production boundary is a Celld fleet behind Traefik TLS with rate limiting on the
+- The approved production boundary is one Celld runtime behind Traefik TLS with rate limiting on the
   native `/join` action. Expose only Celld's public Worker listener; keep its internal
   peer/operator listener private.
-- A regular Celld fleet requires a bucket backend with atomic conditional create and overwrite,
-  read-after-write consistency, exact ranged reads, listing, and deletion. Azurite is acceptable
-  for this single-host, non-critical deployment but is not qualified by Celld for production.
-- Keep the object-store data and Celld work directory on persistent host volumes. Treat the
-  bucket as the fleet's authority and back it up together with Celld's local state.
-- Production uses two long-running services: one Azurite blob-storage container and one Radio
-  image that idempotently deploys the current Worker before starting Celld. Do not reintroduce
-  separate bucket-bootstrap or deployment-image services.
+- Production targets the pinned `jackharrhy/celld` fork's explicitly single-node SQLite object
+  store. The ordinary `sqlite:///absolute/path/objects.sqlite3` bucket configuration must work
+  for deployment, diagnostics, and runtime startup; do not use `CELLD_INTERNAL_DEV_STORE` or
+  `celld dev` as a production shortcut.
+- The Radio image copies `/usr/local/bin/celld` from one digest-pinned fork OCI image. Keep that
+  runtime independent of Radio's build; never download a floating install script in Docker.
+- Keep authoritative objects at `/app/.celld/object-store/objects.sqlite3` and replica/cache
+  files at `/app/.celld/state`, under the persistent `/app/.celld` mount. A cache cleanup must
+  never delete the object store. Back up the authoritative store consistently, including its WAL.
+- Run one Radio runtime per local store. There is no host-loss failover or multi-host shared-disk
+  mode. The Celld runtime guard must reject a second runtime or an offline migration.
+- One Radio application container prepares the selected backend, diagnoses it, deploys the Worker,
+  and then execs Celld. Azure/Azurite support remains for migration and comparison; it is not the
+  default storage dependency. Do not add separate deployment-image or bootstrap services.
+- Preserve all room and media APIs and the full 1 GiB upload limit. A backend change must preserve
+  room IDs, track keys, queue/playback state, audio bytes, attributes, and range/HEAD behavior.
 - Pushes to `main` publish the single-platform `linux/amd64` image as `ghcr.io/jackharrhy/radio:main`.
 
 ## Verification
@@ -98,4 +107,6 @@ Put code in the narrowest owner. Add `app/actions/<route-key>/controller.tsx` on
 - Use Remix route/server tests for rendering and real Worker tests for HTTP and coordination behavior.
 - Use component tests only for DOM-specific behavior.
 - Add regression coverage for lifecycle, reconnect, synchronization, and persistence bugs.
-- Finish changes with `npm test`, `npm run typecheck`, `remix doctor`, and a production-mode smoke test.
+- Finish changes with `npm test`, `npm run typecheck`, `remix doctor`, and `npm run test:celld`
+  against the exact fork binary. The smoke test uses only its own rooms and storage; it must
+  preserve acknowledged queue changes and audio after SIGKILL with an empty replica directory.

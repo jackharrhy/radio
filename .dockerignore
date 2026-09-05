@@ -4,6 +4,9 @@
 .upstream
 .celld
 .wrangler
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 dist
 node_modules
 public/fonts/*.woff2
